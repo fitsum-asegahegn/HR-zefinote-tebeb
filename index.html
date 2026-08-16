@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="am">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>ፍኖተ ጥበብ — ዲጂታል መገኘት</title>
+<meta name="theme-color" content="#14110f"/>
+<link rel="manifest" href="./manifest.json"/>
+<link rel="icon" href="./icon-192.png"/>
+<link rel="apple-touch-icon" href="./icon-192.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+Ethiopic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14110f; --bg2:#1c1815; --card:#221d19;
+    --amber:#f2a33c; --amber-dim:#8a5c22;
+    --text:#f2ede6; --muted:#9c9187;
+    --green:#4caf7d; --red:#e0605a;
+    --border:#332c26;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'Noto Sans Ethiopic','JetBrains Mono',monospace;
+    padding-bottom:70px;
+  }
+  h1,h2,h3{ font-family:'Fraunces','Noto Sans Ethiopic',serif; color:var(--amber); }
+  header{
+    padding:18px 16px 10px; text-align:center;
+    border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:var(--bg); z-index:10;
+  }
+  header h1{ font-size:1.25rem; margin:0 0 2px; }
+  header .sub{ color:var(--muted); font-size:0.78rem; }
+  #view{ padding:14px 14px 30px; max-width:640px; margin:0 auto; }
+
+  .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }
+  .stat-card{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; text-align:center; }
+  .stat-num{ font-family:'JetBrains Mono',monospace; font-size:1.6rem; color:var(--amber); font-weight:700; }
+  .stat-label{ font-size:0.72rem; color:var(--muted); margin-top:4px; }
+
+  .section-title{ margin:22px 0 8px; font-size:1rem; }
+  .list{ display:flex; flex-direction:column; gap:8px; }
+  .list-row{
+    display:flex; justify-content:space-between; align-items:center;
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px;
+  }
+  .muted{ color:var(--muted); font-size:0.78rem; }
+  .row-actions{ display:flex; gap:6px; align-items:center; }
+
+  .badge{ font-size:0.72rem; padding:4px 9px; border-radius:20px; font-family:'JetBrains Mono',monospace; white-space:nowrap; }
+  .badge-red{ background:#3a201d; color:var(--red); }
+  .badge-amber{ background:#3a2c15; color:var(--amber); }
+  .badge-green{ background:#173a28; color:var(--green); }
+
+  button{ font-family:inherit; cursor:pointer; border:none; }
+  .btn-primary{ background:var(--amber); color:#1a1410; font-weight:700; padding:10px 16px; border-radius:10px; font-size:0.85rem; }
+  .btn-secondary{ background:var(--bg2); color:var(--text); border:1px solid var(--border); padding:9px 14px; border-radius:10px; font-size:0.82rem; }
+  .btn-small{ background:var(--bg2); color:var(--amber); border:1px solid var(--amber-dim); padding:6px 10px; border-radius:8px; font-size:0.74rem; }
+  .file-btn{ display:inline-flex; align-items:center; justify-content:center; }
+
+  .toolbar{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .text-input{
+    width:100%; background:var(--bg2); border:1px solid var(--border); color:var(--text);
+    padding:10px 12px; border-radius:10px; font-size:0.85rem; margin-bottom:10px; font-family:inherit;
+  }
+  .text-input.small{ width:70px; margin-bottom:0; padding:6px 8px; }
+  .form-grid{ display:grid; grid-template-columns:1fr; gap:2px 10px; margin-bottom:10px; }
+  .form-grid label{ font-size:0.75rem; color:var(--muted); margin-top:6px; }
+
+  .scan-controls{ display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+  .scan-controls select{
+    background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:9px 10px; font-family:inherit;
+  }
+
+  nav.tabs{
+    position:fixed; bottom:0; left:0; right:0; background:var(--bg2);
+    border-top:1px solid var(--border); display:flex; z-index:20;
+  }
+  .tab-btn{
+    flex:1; background:transparent; color:var(--muted); padding:10px 0 8px;
+    display:flex; flex-direction:column; align-items:center; gap:2px; font-size:0.66rem;
+  }
+  .tab-btn .ic{ font-size:1.15rem; }
+  .tab-btn.active{ color:var(--amber); }
+
+  .modal{ position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .modal-inner{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; text-align:center; }
+  .modal-inner button{ margin-top:12px; }
+
+  .print-only{ display:none; }
+  @media print{
+    header, nav.tabs, .toolbar, #memberSearch, #memberList{ display:none !important; }
+    body{ background:#fff; color:#000; padding:0; }
+    .print-only{ display:flex !important; flex-wrap:wrap; gap:10px; }
+    .qr-cell{ width:130px; text-align:center; font-size:11px; border:1px solid #ccc; padding:6px; }
+    .qr-label{ margin-top:4px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>ፍኖተ ጥበብ — ዲጂታል መገኘት</h1>
+    <div class="sub">QR-based offline attendance · HR ንዑስ ክፍል</div>
+  </header>
+
+  <div id="view"></div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="dashboard" onclick="setTab('dashboard')"><span class="ic">🏠</span>ዳሽቦርድ</button>
+    <button class="tab-btn" data-tab="scan" onclick="setTab('scan')"><span class="ic">📷</span>ስካን</button>
+    <button class="tab-btn" data-tab="members" onclick="setTab('members')"><span class="ic">👥</span>አባላት</button>
+    <button class="tab-btn" data-tab="reports" onclick="setTab('reports')"><span class="ic">📊</span>ሪፖርት</button>
+    <button class="tab-btn" data-tab="settings" onclick="setTab('settings')"><span class="ic">⚙️</span>ቅንብር</button>
+  </nav>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
