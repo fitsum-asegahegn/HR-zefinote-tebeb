@@ -30,6 +30,9 @@ Bilingual: every screen has an EN/አማ toggle in the top-right corner
 5. On first app load (or Settings → ☁️ Supabase connection if you skipped
    it before), paste those two values in and continue. You'll land on a
    sign-in/sign-up screen — each HR member creates their own account.
+   Everyone starts as `member`; open the `user_roles` table in Supabase
+   and change someone's row to `admin` if they should be able to delete
+   records.
 6. If you'd rather not use the cloud at all, tap **"Skip — offline only"**
    on that first screen. You can always come back to Settings later and
    connect it.
@@ -79,14 +82,75 @@ Bilingual: every screen has an EN/አማ toggle in the top-right corner
   celebration/condolence check-ins) surface on the dashboard with due
   dates; "ተከናውኗል ✓/Done ✓" reschedules the recurring ones.
 
+## Batch scanning
+Scan (camera or manual search) now queues each hit into a review list
+instead of writing it instantly — scan a whole line of kids quickly,
+glance at the list to remove any mis-scans, then **✓ Confirm all** writes
+them in one go, timestamped by when each was actually scanned (not when
+you tapped confirm), so late/on-time is still accurate.
+
+## Printed QR cards (8 per A4 page) + soft copy
+Members → 🖨 Print all QR codes lays out an ID-card grid: 2 columns × 4
+rows per page, each card split in half — QR on the left, a 3×4 photo box
++ the person's name on the right (paste/attach a photo into the box
+however you normally produce ID cards). Every member's individual QR
+modal also has **⬇ Download** and **↗ Share** buttons so you can send the
+soft copy straight to their phone (e.g. over Telegram) if they forget
+the printed card.
+
+## Charts
+Reports tab now shows an attendance-trend line (last 12 sessions) and a
+per-program on-time/late bar chart, computed entirely from local data —
+works offline.
+
+## Local notifications (not server push)
+Settings → 🔔 lets you opt in to local reminders that surface absentees,
+confession-due members, and overdue HR events while the app is open on
+that device. This is genuinely different from real push notifications:
+there's no server that can wake the app when it's closed, since that
+would require standing up backend infrastructure (a push service +
+VAPID keys) which conflicts with this project's zero-server, static-site
+design. If you later want true push, that's a separate, heavier project.
+
+## Biometric unlock (device-level convenience only)
+Settings → 🔐 lets a device remember a fingerprint/face credential via
+WebAuthn. This is **not** a replacement for the Supabase sign-in and
+nothing is verified server-side — it's purely a fast local gate so
+whoever's holding an already-signed-in phone doesn't have to retype a
+password each time. Turning it on only affects that one device/browser.
+
+## Role-based access control (Supabase)
+`supabase-schema.sql` now also creates a `user_roles` table: every new
+sign-up becomes `member` automatically. Promote someone to `admin` by
+editing that table directly in the Supabase dashboard (or `update
+user_roles set role='admin' where user_id='...'`). Admins can delete
+members/attendance/HR-events; members can read and add/update but not
+delete — enforced by Postgres RLS policies, not just hidden buttons, so
+it holds even if someone calls the API directly. In offline-only mode
+(no Supabase connected) this restriction doesn't apply since there's no
+shared database to protect.
+
+## Background sync (best-effort)
+When a scan is recorded while offline, the app also registers a
+Background Sync tag so Chromium/Android browsers can push it up shortly
+after connectivity returns, even if you've switched away from the app.
+This is progressive enhancement only — notably unsupported on iOS
+Safari — so the reliable path is still: open the app, it syncs
+automatically via the regular online-event listener.
+
 ## Files
-- `index.html` — app shell, dark/amber styling (Fraunces + JetBrains Mono)
-- `i18n.js` — full AM/EN dictionary + `t()` helper + language toggle
-- `auth.js` — Supabase client init, sign-in/sign-up screens, cloud sync
-- `app.js` — IndexedDB, Excel import, QR gen/scan, attendance rules,
-  dashboard analytics, exports, tab routing, boot/auth orchestration
-- `manifest.json`, `sw.js` — PWA installability + offline caching
+- `index.html` — app shell, dark/amber styling (Fraunces + JetBrains Mono),
+  print CSS for the 8-per-page ID card layout
+- `i18n.js` — full AM/EN dictionary + `t()` helper + language toggle with
+  automatic browser-locale detection on first run
+- `auth.js` — Supabase client init, sign-in/sign-up screens, role lookup,
+  cloud sync
+- `app.js` — IndexedDB, Excel import/export, QR gen/scan (batch queue),
+  attendance rules, dashboard analytics, charts, notifications,
+  biometric unlock, tab routing, boot/auth orchestration
+- `manifest.json`, `sw.js` — PWA installability, offline caching, and a
+  best-effort Background Sync handler
   (bump the `CACHE` version string in `sw.js` whenever you redeploy
   changed files, so phones pick up the update)
-- `supabase-schema.sql` — one-time table + RLS setup for Supabase
+- `supabase-schema.sql` — one-time table + RLS + role setup for Supabase
 - `icon-192.png`, `icon-512.png` — app icons

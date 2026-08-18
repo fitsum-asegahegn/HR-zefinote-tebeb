@@ -138,6 +138,30 @@ async function signOut() {
 }
 window.signOut = signOut;
 
+// ---------- Mirror auth into IndexedDB for the service worker's background sync ----------
+async function mirrorAuthForSW(session) {
+  if (!session) return;
+  const cfg = getSupabaseConfig();
+  if (!cfg.url || !cfg.key) return;
+  try {
+    await setSetting("sbUrlMirror", cfg.url);
+    await setSetting("sbKeyMirror", cfg.key);
+    await setSetting("sbAccessTokenMirror", session.access_token);
+  } catch (e) {}
+}
+
+// ---------- Role-based access control (client-side reflection of DB role) ----------
+window.currentUserRole = "member";
+async function fetchUserRole(session) {
+  if (!sbClient || !session) { window.currentUserRole = "member"; return; }
+  try {
+    const { data } = await sbClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+    window.currentUserRole = (data && data.role) || "member";
+  } catch (e) {
+    window.currentUserRole = "member"; // fail-safe: never assume admin
+  }
+}
+
 // ---------- Cloud sync (Supabase tables: members, attendance, hr_events) ----------
 function mapMemberToRemote(m) {
   return {

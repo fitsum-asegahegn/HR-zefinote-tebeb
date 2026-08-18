@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
 let db;
 let currentTab = "dashboard";
 let appState = "boot"; // boot | setup | auth | offline-no-session | app
-let scanState = { streaming: false, stream: null, program: "timhert", recentHits: new Map() };
+let scanState = { streaming: false, stream: null, program: "timhert", recentHits: new Map(), batch: [] };
 
 // ---------- IndexedDB ----------
 function openDB() {
@@ -200,7 +200,13 @@ async function recordAttendance(memberId, programKey, atDate = new Date()) {
   record.deviceId = settings.deviceId;
   record.synced = false;
   await put("attendance", record);
+  if (!navigator.onLine) requestBackgroundSync();
   return { record, status };
+}
+function requestBackgroundSync() {
+  if ("serviceWorker" in navigator && "SyncManager" in window) {
+    navigator.serviceWorker.ready.then((reg) => reg.sync.register("sync-attendance")).catch(() => {});
+  }
 }
 
 // ---------- Dashboard analytics ----------
@@ -353,7 +359,7 @@ async function renderDashboard() {
 window.markConfessed = async (memberId) => { const m = await get("members", memberId); m.lastConfessionDate = todayISO(); m.synced = false; await put("members", m); renderDashboard(); };
 window.doneHrEvent = async (id) => { await markHrEventDone(id); renderDashboard(); };
 
-// ---------- Scan ----------
+// ---------- Scan (batch queue: scan several, review, then confirm all at once) ----------
 async function renderScan() {
   const members = await getAll("members");
   const progs = PROGRAM_DEFS();
@@ -365,21 +371,74 @@ async function renderScan() {
     </div>
     <video id="video" playsinline style="width:100%;max-width:420px;border-radius:12px;display:none;"></video>
     <canvas id="canvas" style="display:none;"></canvas>
+
+    <h3 class="section-title">${t("batch.title")}</h3>
+    <div class="toolbar">
+      <button id="confirmBatchBtn" class="btn-primary">${t("batch.confirmAll")} (<span id="batchCount">0</span>)</button>
+      <button id="clearBatchBtn" class="btn-secondary">${t("batch.clear")}</button>
+    </div>
+    <div id="batchList" class="list"></div>
+
     <div id="scanFeed" class="list"></div>
+
     <h3 class="section-title">${t("scan.manualTitle")}</h3>
     <input id="manualSearch" placeholder="${t("scan.searchPlaceholder")}" class="text-input"/>
     <div id="manualResults" class="list"></div>
   `;
   el("programSelect").onchange = (e) => (scanState.program = e.target.value);
   el("camToggle").onclick = toggleCamera;
+  el("confirmBatchBtn").onclick = confirmBatch;
+  el("clearBatchBtn").onclick = () => { scanState.batch = []; renderBatchList(); };
   el("manualSearch").oninput = (e) => {
     const q = e.target.value.trim().toLowerCase();
     const filtered = q ? members.filter((m) => m.fullName.toLowerCase().includes(q)) : [];
     el("manualResults").innerHTML = filtered.slice(0, 15).map((m) => `
-      <div class="list-row"><div>${m.fullName}</div><button class="btn-small" onclick="manualScan('${m.id}')">${t("scan.record")}</button></div>`).join("");
+      <div class="list-row"><div>${m.fullName}</div><button class="btn-small" onclick="queueScan('${m.id}')">${t("scan.record")}</button></div>`).join("");
   };
+  renderBatchList();
 }
-window.manualScan = async (memberId) => { const m = await get("members", memberId); const { status } = await recordAttendance(memberId, scanState.program, new Date()); pushScanFeed(m, status); };
+
+function renderBatchList() {
+  const box = el("batchList");
+  const countEl = el("batchCount");
+  if (!box) return;
+  if (countEl) countEl.textContent = scanState.batch.length;
+  box.innerHTML = scanState.batch.length
+    ? scanState.batch.map((item, i) => `
+        <div class="list-row">
+          <div><b>${item.fullName}</b><br><span class="muted">${item.scannedAt.toLocaleTimeString()}</span></div>
+          <button class="btn-small" onclick="removeFromBatch(${i})">${t("batch.remove")}</button>
+        </div>`).join("")
+    : `<p class="muted">${t("batch.empty")}</p>`;
+}
+window.removeFromBatch = (i) => { scanState.batch.splice(i, 1); renderBatchList(); };
+
+async function queueScan(memberId) {
+  if (scanState.batch.some((b) => b.memberId === memberId)) return; // dedupe
+  const m = await get("members", memberId);
+  if (!m) return;
+  scanState.batch.push({ memberId, fullName: m.fullName, scannedAt: new Date() });
+  renderBatchList();
+  if (navigator.vibrate) navigator.vibrate(40);
+}
+window.queueScan = queueScan;
+
+async function confirmBatch() {
+  if (!scanState.batch.length) return;
+  const items = [...scanState.batch];
+  scanState.batch = [];
+  renderBatchList();
+  for (const item of items) {
+    const { status } = await recordAttendance(item.memberId, scanState.program, item.scannedAt);
+    pushScanFeed({ fullName: item.fullName }, status);
+  }
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = t("batch.confirmedToast", { n: items.length });
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+
 function pushScanFeed(member, status) {
   const feed = el("scanFeed");
   if (!feed) return;
@@ -426,13 +485,12 @@ function scanLoop() {
 async function handleQrHit(qrId) {
   const now = Date.now();
   const last = scanState.recentHits.get(qrId) || 0;
-  if (now - last < 4000) return;
+  if (now - last < 1500) return; // debounce duplicate frames, short enough for rapid batch scanning
   scanState.recentHits.set(qrId, now);
   const members = await getAll("members");
   const member = members.find((m) => m.qrId === qrId);
   if (!member) return;
-  const { status } = await recordAttendance(member.id, scanState.program, new Date());
-  pushScanFeed(member, status);
+  await queueScan(member.id);
 }
 
 // ---------- Members ----------
@@ -443,18 +501,20 @@ async function renderMembers() {
       <label class="btn-primary file-btn">${t("members.importExcel")}<input type="file" id="excelInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
       <button class="btn-secondary" id="addMemberBtn">${t("members.addMember")}</button>
       <button class="btn-secondary" id="printQrBtn">${t("members.printAllQr")}</button>
+      <button class="btn-secondary" id="exportMembersBtn">${t("members.exportExcel")}</button>
     </div>
     <input id="memberSearch" class="text-input" placeholder="${t("members.searchPlaceholder")}"/>
     <div id="memberList" class="list"></div>
     <div id="printArea" class="print-only"></div>
   `;
   function draw(list) {
+    const isAdmin = window.currentUserRole === "admin" || !sbClient; // no cloud = no RBAC, allow local admin actions
     el("memberList").innerHTML = list.map((m) => `
       <div class="list-row">
         <div><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""}</span></div>
         <div class="row-actions">
           <button class="btn-small" onclick="showQr('${m.id}')">${t("members.qr")}</button>
-          <button class="btn-small" onclick="deleteMember('${m.id}')">${t("members.delete")}</button>
+          ${isAdmin ? `<button class="btn-small" onclick="deleteMember('${m.id}')">${t("members.delete")}</button>` : ""}
         </div>
       </div>`).join("");
   }
@@ -468,25 +528,94 @@ async function renderMembers() {
     await addMemberManual(name, phone, category); renderMembers();
   };
   el("printQrBtn").onclick = () => printAllQr(members);
+  el("exportMembersBtn").onclick = () => exportMembersExcel(members);
 }
-window.deleteMember = async (id) => { if (!confirm(t("members.confirmDelete"))) return; await del("members", id); renderMembers(); };
+window.deleteMember = async (id) => {
+  if (window.currentUserRole !== "admin" && sbClient) { alert(t("role.adminOnly")); return; }
+  if (!confirm(t("members.confirmDelete"))) return;
+  await del("members", id); renderMembers();
+};
 window.showQr = async (id) => {
   const m = await get("members", id);
   const box = document.createElement("div");
   box.className = "modal";
-  box.innerHTML = `<div class="modal-inner"><h3>${m.fullName}</h3><div id="qrBox"></div><button class="btn-secondary" onclick="this.closest('.modal').remove()">${t("members.close")}</button></div>`;
+  box.innerHTML = `
+    <div class="modal-inner">
+      <h3>${m.fullName}</h3>
+      <div id="qrBox"></div>
+      <p class="muted" style="max-width:220px;">${t("members.softCopyNote")}</p>
+      <div class="row-actions" style="justify-content:center;margin-top:8px;">
+        <button class="btn-small" id="qrDownloadBtn">${t("members.downloadQr")}</button>
+        <button class="btn-small" id="qrShareBtn">${t("members.shareQr")}</button>
+      </div>
+      <button class="btn-secondary" style="margin-top:10px;" onclick="this.closest('.modal').remove()">${t("members.close")}</button>
+    </div>`;
   document.body.appendChild(box);
   new QRCode(document.getElementById("qrBox"), { text: m.qrId, width: 220, height: 220 });
+  el("qrDownloadBtn").onclick = () => downloadQrPng(box.querySelector("#qrBox"), m.fullName);
+  el("qrShareBtn").onclick = () => shareQrPng(box.querySelector("#qrBox"), m.fullName);
 };
+
+function qrBoxToBlob(qrBoxEl) {
+  return new Promise((resolve) => {
+    const canvas = qrBoxEl.querySelector("canvas");
+    if (canvas) { canvas.toBlob(resolve, "image/png"); return; }
+    const img = qrBoxEl.querySelector("img");
+    if (!img) { resolve(null); return; }
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth || 220; c.height = img.naturalHeight || 220;
+    c.getContext("2d").drawImage(img, 0, 0);
+    c.toBlob(resolve, "image/png");
+  });
+}
+async function downloadQrPng(qrBoxEl, name) {
+  const blob = await qrBoxToBlob(qrBoxEl);
+  if (blob) downloadBlob(blob, `qr-${name.replace(/\s+/g, "_")}.png`);
+}
+async function shareQrPng(qrBoxEl, name) {
+  const blob = await qrBoxToBlob(qrBoxEl);
+  if (!blob) return;
+  const file = new File([blob], `qr-${name.replace(/\s+/g, "_")}.png`, { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) {}
+  }
+  downloadBlob(blob, file.name); // fallback: just download it
+}
+
+async function exportMembersExcel(members) {
+  const rows = members.map((m) => ({
+    Name: m.fullName, Phone: m.phone || "", Category: m.category || "",
+    LastConfession: m.lastConfessionDate || "", JoinDate: m.joinDate || "", QrId: m.qrId,
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Members");
+  XLSX.writeFile(wb, `finote-members-${todayISO()}.xlsx`);
+}
+
+// 8 ID cards per A4 page: left half QR, right half a 3x4 photo box + name below it.
 async function printAllQr(members) {
   const area = el("printArea");
   area.innerHTML = "";
-  for (const m of members) {
-    const cell = document.createElement("div"); cell.className = "qr-cell";
-    const qrDiv = document.createElement("div"); cell.appendChild(qrDiv);
-    const label = document.createElement("div"); label.className = "qr-label"; label.textContent = m.fullName; cell.appendChild(label);
-    area.appendChild(cell);
-    new QRCode(qrDiv, { text: m.qrId, width: 120, height: 120 });
+  const perPage = 8;
+  for (let i = 0; i < members.length; i += perPage) {
+    const pageMembers = members.slice(i, i + perPage);
+    const page = document.createElement("div");
+    page.className = "qr-page";
+    for (const m of pageMembers) {
+      const card = document.createElement("div");
+      card.className = "id-card";
+      const qrHalf = document.createElement("div");
+      qrHalf.className = "qr-half";
+      card.appendChild(qrHalf);
+      const infoHalf = document.createElement("div");
+      infoHalf.className = "info-half";
+      infoHalf.innerHTML = `<div class="photo-box"></div><div class="id-name">${m.fullName}</div><div class="id-org">ፍኖተ ጥበብ ሰ/ት/ቤት</div>`;
+      card.appendChild(infoHalf);
+      page.appendChild(card);
+      new QRCode(qrHalf, { text: m.qrId, width: 240, height: 240 });
+    }
+    area.appendChild(page);
   }
   await new Promise((r) => setTimeout(r, 300));
   window.print();
@@ -536,6 +665,7 @@ async function renderSettings() {
     <h3 class="section-title">${t("settings.cloudTitle")}</h3>
     ${sbClient ? `
       <p class="muted">${session ? t("settings.signedInAs") + " " + session.user.email : t("settings.notConnected")}</p>
+      ${session ? `<p class="muted">${t("role.title")}: <b style="color:var(--amber)">${window.currentUserRole === "admin" ? t("role.admin") : t("role.member")}</b></p>` : ""}
       <div class="toolbar">
         ${session ? `<button id="signOutBtn" class="btn-secondary">${t("settings.signOut")}</button>` : `<button id="goAuthBtn" class="btn-secondary">${t("settings.goSignIn")}</button>`}
         <button id="disconnectBtn" class="btn-secondary">${t("settings.disconnectCloud")}</button>
@@ -546,6 +676,18 @@ async function renderSettings() {
       <input id="cl_key" class="text-input" placeholder="${t("auth.keyPlaceholder")}" value="${cfg.key}"/>
       <button id="connectBtn" class="btn-primary">${t("settings.connectCloud")}</button>
     `}
+
+    <h3 class="section-title">${t("notif.title")}</h3>
+    <p class="muted">${t("notif.desc")}</p>
+    <div class="toolbar">
+      <button id="notifBtn" class="btn-secondary">${(typeof Notification !== "undefined" && Notification.permission === "granted") ? t("notif.granted") : t("notif.enable")}</button>
+    </div>
+
+    <h3 class="section-title">${t("bio.title")}</h3>
+    <p class="muted">${t("bio.desc")}</p>
+    <div class="toolbar">
+      <button id="bioBtn" class="btn-secondary">${bioIsEnabled() ? t("bio.disable") : t("bio.enable")}</button>
+    </div>
 
     <h3 class="section-title">${t("settings.syncTitle")}</h3>
     <p class="muted" id="syncStatus">-</p>
@@ -574,13 +716,102 @@ async function renderSettings() {
   if (el("disconnectBtn")) el("disconnectBtn").onclick = () => { clearSupabaseConfig(); setSkipCloud(true); boot(); };
   if (el("signOutBtn")) el("signOutBtn").onclick = signOut;
   if (el("goAuthBtn")) el("goAuthBtn").onclick = () => { setSkipCloud(false); appState = "auth"; renderAuthScreen(); };
+  el("notifBtn").onclick = enableNotifications;
+  el("bioBtn").onclick = toggleBiometric;
   el("syncBtn").onclick = syncNow;
   el("exportJsonBtn").onclick = exportScansJSON;
   el("exportExcelBtn").onclick = exportAttendanceExcel;
   el("importJsonInput").onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const { mCount, aCount } = await importScansJSON(file); alert(t("settings.importedJsonResult", { m: mCount, a: aCount })); };
 }
 
+// ---------- Local notifications (in-app reminders; not real server push) ----------
+async function enableNotifications() {
+  if (!("Notification" in window)) { alert(t("bio.notSupported")); return; }
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    alert(t("notif.granted"));
+    await setSetting("notificationsEnabled", true);
+    checkAndNotify();
+  } else {
+    alert(t("notif.denied"));
+  }
+  renderSettings();
+}
+async function checkAndNotify() {
+  const settings = await getSettings();
+  if (!settings.notificationsEnabled) return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const [absentees, confessionDue, hrDue] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computeHrEventsDue()]);
+  const overdueHr = hrDue.filter((e) => e.overdue);
+  const parts = [];
+  if (absentees.length) parts.push(`${absentees.length} ${getLang() === "am" ? "ተከታታይ ቀሪ" : "on an absence streak"}`);
+  if (confessionDue.length) parts.push(`${confessionDue.length} ${getLang() === "am" ? "ንስሃ ደርሷል" : "confession due"}`);
+  if (overdueHr.length) parts.push(`${overdueHr.length} ${getLang() === "am" ? "የክፍል ማስታወሻ" : "HR reminder(s)"}`);
+  if (!parts.length) return;
+  const body = parts.join(" · ");
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification(t("app.title"), { body, icon: "./icon-192.png", tag: "ftw-daily-check" });
+    } else {
+      new Notification(t("app.title"), { body, icon: "./icon-192.png" });
+    }
+  } catch (e) {}
+}
+
+// ---------- Biometric device-level unlock (WebAuthn platform authenticator) ----------
+// NOTE: this is a *local convenience gate*, not a replacement for the Supabase
+// sign-in — no server verifies the assertion. It just guards quick re-entry
+// to the app on a device that has already signed in to Supabase at least once.
+function bioIsEnabled() { return !!localStorage.getItem("ftw_bio_cred_id"); }
+async function toggleBiometric() {
+  if (bioIsEnabled()) {
+    localStorage.removeItem("ftw_bio_cred_id");
+    renderSettings();
+    return;
+  }
+  if (!window.PublicKeyCredential) { alert(t("bio.notSupported")); return; }
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = crypto.getRandomValues(new Uint8Array(16));
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: "Finote Tsibeb Attendance" },
+        user: { id: userId, name: "hr-device-user", displayName: "HR Device User" },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+        timeout: 60000,
+      },
+    });
+    if (cred) {
+      localStorage.setItem("ftw_bio_cred_id", btoa(String.fromCharCode(...new Uint8Array(cred.rawId))));
+      alert(t("bio.enabled"));
+    }
+  } catch (e) {
+    alert(t("bio.failed"));
+  }
+  renderSettings();
+}
+async function unlockWithBiometric() {
+  const credIdB64 = localStorage.getItem("ftw_bio_cred_id");
+  if (!credIdB64) return false;
+  try {
+    const rawId = Uint8Array.from(atob(credIdB64), (c) => c.charCodeAt(0));
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({
+      publicKey: { challenge, allowCredentials: [{ id: rawId, type: "public-key" }], userVerification: "required", timeout: 60000 },
+    });
+    return !!assertion;
+  } catch (e) {
+    return false;
+  }
+}
+
 // ---------- Reports ----------
+let chartInstances = [];
+function destroyCharts() { chartInstances.forEach((c) => c.destroy()); chartInstances = []; }
+
 async function renderReports() {
   const attendance = (await getAll("attendance")).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const members = await getAll("members");
@@ -588,6 +819,14 @@ async function renderReports() {
   const progs = PROGRAM_DEFS();
   el("view").innerHTML = `
     <div class="toolbar"><button id="repExcel" class="btn-secondary">${t("reports.downloadExcel")}</button></div>
+
+    <h3 class="section-title">${t("charts.attendanceTrend")}</h3>
+    <div class="chart-box"><canvas id="trendChart"></canvas></div>
+
+    <h3 class="section-title">${t("charts.byProgram")}</h3>
+    <div class="chart-box"><canvas id="progChart"></canvas></div>
+
+    <h3 class="section-title">${t("reports.logTitle")}</h3>
     <div class="list">
       ${attendance.slice(0, 200).map((a) => `
         <div class="list-row">
@@ -597,6 +836,47 @@ async function renderReports() {
     </div>
   `;
   el("repExcel").onclick = exportAttendanceExcel;
+  drawCharts(attendance, progs);
+}
+
+function drawCharts(attendance, progs) {
+  destroyCharts();
+  if (typeof Chart === "undefined") return;
+
+  // Attendance trend: total scans per session date, last 12 dates
+  const byDate = {};
+  attendance.forEach((a) => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
+  const dates = Object.keys(byDate).sort().slice(-12);
+  const trendCanvas = el("trendChart");
+  if (dates.length && trendCanvas) {
+    chartInstances.push(new Chart(trendCanvas, {
+      type: "line",
+      data: { labels: dates, datasets: [{ label: t("charts.attendanceTrend"), data: dates.map((d) => byDate[d]), borderColor: "#f2a33c", backgroundColor: "rgba(242,163,60,0.15)", tension: 0.3, fill: true }] },
+      options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
+    }));
+  } else if (trendCanvas) {
+    trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
+  }
+
+  // By program: total scans per program, on-time vs late
+  const progCanvas = el("progChart");
+  if (attendance.length && progCanvas) {
+    const onTime = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "on-time").length);
+    const late = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "late").length);
+    chartInstances.push(new Chart(progCanvas, {
+      type: "bar",
+      data: {
+        labels: progs.map((p) => p.name),
+        datasets: [
+          { label: t("scan.onTime"), data: onTime, backgroundColor: "#4caf7d" },
+          { label: t("scan.late"), data: late, backgroundColor: "#e0605a" },
+        ],
+      },
+      options: { scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
+    }));
+  } else if (progCanvas) {
+    progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
+  }
 }
 
 // ---------- Tabs ----------
@@ -620,16 +900,40 @@ async function boot() {
   if (!sbClient) { appState = "setup"; renderSupabaseSetup(); return; }
 
   const session = await getSession();
-  if (session) { await enterApp(); return; }
+  if (session) {
+    await mirrorAuthForSW(session);
+    await fetchUserRole(session);
+    if (bioIsEnabled()) { appState = "biolock"; renderBioLock(); return; }
+    await enterApp();
+    return;
+  }
 
   if (navigator.onLine) { appState = "auth"; renderAuthScreen(); }
   else { appState = "offline-no-session"; renderOfflineNoSession(); }
 }
+function renderBioLock() {
+  el("view").innerHTML = `
+    <div class="auth-wrap">
+      <h2>${t("bio.unlock")}</h2>
+      <button id="bioUnlockBtn" class="btn-primary" style="width:100%;margin-bottom:10px;">${t("bio.unlock")}</button>
+      <button id="bioSkipBtn" class="btn-secondary" style="width:100%;">${t("bio.skip")}</button>
+    </div>
+  `;
+  const tryUnlock = async () => { const ok = await unlockWithBiometric(); if (ok) enterApp(); };
+  el("bioUnlockBtn").onclick = tryUnlock;
+  el("bioSkipBtn").onclick = () => enterApp();
+  tryUnlock(); // auto-prompt immediately, buttons remain as fallback
+}
+
 async function enterApp() {
   appState = "app";
   document.querySelector("nav.tabs").style.display = "flex";
   setTab("dashboard");
   syncNow();
+  checkAndNotify();
+  if (!window._ftwNotifyInterval) {
+    window._ftwNotifyInterval = setInterval(checkAndNotify, 30 * 60 * 1000); // every 30 min while app stays open
+  }
 }
 
 async function init() {

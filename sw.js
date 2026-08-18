@@ -16,6 +16,7 @@ const RUNTIME_LIBS = [
   "https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js",
   "https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+  "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js",
 ];
 
 self.addEventListener("install", (e) => {
@@ -54,4 +55,77 @@ self.addEventListener("fetch", (e) => {
       return cached || fetchPromise;
     })
   );
+});
+
+/* ---------- Background Sync (best-effort) ----------
+   Progressive enhancement only: works on Chromium/Android when the tag is
+   registered from app.js after an offline scan. Not supported on iOS
+   Safari — the existing `online` event listener in auth.js is the
+   reliable fallback used whenever the app itself is open. */
+const SW_DB_NAME = "finote_attendance";
+function swOpenDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SW_DB_NAME);
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function swGetAll(db, store) {
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(store, "readonly").objectStore(store).getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+function swPut(db, store, val) {
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(store, "readwrite").objectStore(store).put(val);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function swSettingsMap(db) {
+  const rows = await swGetAll(db, "settings");
+  const m = {};
+  rows.forEach((r) => (m[r.key] = r.value));
+  return m;
+}
+
+async function backgroundSyncAttendance() {
+  try {
+    const db = await swOpenDB();
+    const settings = await swSettingsMap(db);
+    const url = settings.sbUrlMirror, key = settings.sbKeyMirror, token = settings.sbAccessTokenMirror;
+    if (!url || !key || !token) return;
+
+    const attendance = await swGetAll(db, "attendance");
+    const pending = attendance.filter((a) => !a.synced);
+    if (pending.length) {
+      const body = pending.map((a) => ({
+        id: a.id, member_id: a.memberId, program_key: a.programKey, session_date: a.sessionDate,
+        ts: a.timestamp, status: a.status, device_id: a.deviceId,
+      }));
+      const resp = await fetch(url + "/rest/v1/attendance?on_conflict=member_id,session_date,program_key", {
+        method: "POST",
+        headers: {
+          apikey: key,
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        for (const a of pending) { a.synced = true; await swPut(db, "attendance", a); }
+      }
+    }
+  } catch (e) {
+    // best-effort; the app's own online-event sync will retry when it's next opened
+  }
+}
+
+self.addEventListener("sync", (e) => {
+  if (e.tag === "sync-attendance") {
+    e.waitUntil(backgroundSyncAttendance());
+  }
 });

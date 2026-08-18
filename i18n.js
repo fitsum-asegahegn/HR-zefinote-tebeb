@@ -86,6 +86,7 @@ const I18N = {
     "sync.working": "እየተመሳሰለ ነው...",
 
     "reports.downloadExcel": "📊 Excel አውርድ",
+    "reports.logTitle": "ዝርዝር መዝገብ",
 
     "auth.setupTitle": "☁️ የደመና ግንኙነት (አማራጭ)",
     "auth.setupDesc": "በርካታ ስልኮች ላይ ያለ መረጃ አንድ ላይ እንዲመሳሰል Supabase ፕሮጀክት አገናኝ። ይህን ካልፈለክ ያለ ደመና ብቻ በዚህ መሳሪያ ላይ መስራት ትችላለህ።",
@@ -107,6 +108,44 @@ const I18N = {
     "auth.offlineNoSession": "ከመስመር ውጪ ነህ እና ገና በዚህ መሳሪያ ላይ አልገባህም። መጀመሪያ አንድ ጊዜ ከመስመር ጋር ተያይዘህ ግባ።",
     "auth.tryAgainOnline": "መስመር ላይ ስትሆን እንደገና ሞክር",
     "auth.useOfflineAnyway": "ያለ መግቢያ ቀጥል (ውሂብ ወደ ደመና አይላክም)",
+
+    "batch.title": "የተሰበሰቡ ቅኝቶች — ከማረጋገጥህ በፊት ገምግም",
+    "batch.confirmAll": "✓ ሁሉንም አረጋግጥ",
+    "batch.clear": "ሁሉንም አጥፋ",
+    "batch.remove": "አውጣ",
+    "batch.empty": "ገና ምንም አልተቃኘም",
+    "batch.confirmedToast": "{n} ተመዝግቧል",
+    "batch.duplicateSkip": "(ቀድሞ ተጨምሯል)",
+
+    "charts.attendanceTrend": "የመገኘት አዝማሚያ (የቅርብ ጊዜ)",
+    "charts.byProgram": "በፕሮግራም የተከፋፈለ",
+    "charts.noData": "ገና በቂ መረጃ የለም",
+
+    "notif.title": "🔔 የማሳወቂያ ቅንብር",
+    "notif.enable": "በዚህ መሳሪያ ማሳወቂያ አብራ",
+    "notif.desc": "መተግበሪያው ክፍት ሆኖ ሳለ ብቻ የሚሰራ የአካባቢ ማሳወቂያ ነው (እውነተኛ የሰርቨር push አይደለም) — ደወሎችን፣ ንስሃ ማስታወሻን እና ቀሪ አባላትን ያሳውቃል።",
+    "notif.denied": "ማሳወቂያ ተከልክሏል — ከአሳሽ ቅንብር አንቃ",
+    "notif.granted": "ማሳወቂያ ነቅቷል ✓",
+
+    "bio.title": "🔐 ባዮሜትሪክ ክፍት (የመሳሪያ ደረጃ)",
+    "bio.desc": "የጣት አሻራ/የፊት ክፍት ተጠቅመህ በዚህ መሳሪያ ላይ መተግበሪያውን በፍጥነት ትከፍታለህ። ማሳሰቢያ፦ ይህ የ Supabase መግቢያህን አይተካም፤ የመሳሪያ ደረጃ ፈጣን መክፈቻ ብቻ ነው።",
+    "bio.enable": "ባዮሜትሪክ አዘጋጅ",
+    "bio.disable": "ባዮሜትሪክ አጥፋ",
+    "bio.unlock": "🔐 በጣት አሻራ/ፊት ክፈት",
+    "bio.notSupported": "በዚህ መሳሪያ/አሳሽ አይደገፍም",
+    "bio.failed": "ክፍት ማድረግ አልተሳካም",
+    "bio.enabled": "ባዮሜትሪክ ተዘጋጅቷል ✓",
+    "bio.skip": "ያለ ባዮሜትሪክ ቀጥል",
+
+    "role.title": "ሚና",
+    "role.admin": "አስተዳዳሪ",
+    "role.member": "አባል",
+    "role.adminOnly": "ይህ ተግባር ለአስተዳዳሪዎች ብቻ ነው",
+
+    "members.exportExcel": "📊 አባላት Excel አውርድ",
+    "members.downloadQr": "⬇ QR አውርድ",
+    "members.shareQr": "↗ QR አጋራ",
+    "members.softCopyNote": "ካርድ ቢረሳ/ቢጠፋ ይህን QR በስልክ ላይ አጋራ",
   },
   en: {
     "app.title": "Finote Tsibeb — Digital Attendance",
@@ -194,6 +233,7 @@ const I18N = {
     "sync.working": "Syncing...",
 
     "reports.downloadExcel": "📊 Download Excel",
+    "reports.logTitle": "Detailed log",
 
     "auth.setupTitle": "☁️ Cloud connection (optional)",
     "auth.setupDesc": "Connect a Supabase project so data from multiple phones stays in sync. Skip this to run fully offline on this device only.",
@@ -215,11 +255,53 @@ const I18N = {
     "auth.offlineNoSession": "You're offline and haven't signed in on this device yet. Connect to the internet once to sign in.",
     "auth.tryAgainOnline": "Retry when online",
     "auth.useOfflineAnyway": "Continue without signing in (nothing will sync)",
+
+    "batch.title": "Scanned queue — review before confirming",
+    "batch.confirmAll": "✓ Confirm all",
+    "batch.clear": "Clear all",
+    "batch.remove": "Remove",
+    "batch.empty": "Nothing scanned yet",
+    "batch.confirmedToast": "{n} recorded",
+    "batch.duplicateSkip": "(already added)",
+
+    "charts.attendanceTrend": "Attendance trend (recent)",
+    "charts.byProgram": "By program",
+    "charts.noData": "Not enough data yet",
+
+    "notif.title": "🔔 Notification settings",
+    "notif.enable": "Enable notifications on this device",
+    "notif.desc": "Local reminders only, shown while the app is open (not real server push) — surfaces absentees, confession reminders, and HR events.",
+    "notif.denied": "Notifications blocked — enable from browser settings",
+    "notif.granted": "Notifications enabled ✓",
+
+    "bio.title": "🔐 Biometric unlock (device-level)",
+    "bio.desc": "Use fingerprint/face unlock to quickly open the app on this device. Note: this does not replace your Supabase sign-in — it's just a fast local unlock.",
+    "bio.enable": "Set up biometric unlock",
+    "bio.disable": "Turn off biometric unlock",
+    "bio.unlock": "🔐 Unlock with fingerprint/face",
+    "bio.notSupported": "Not supported on this device/browser",
+    "bio.failed": "Unlock failed",
+    "bio.enabled": "Biometric unlock set up ✓",
+    "bio.skip": "Continue without biometric",
+
+    "role.title": "Role",
+    "role.admin": "Admin",
+    "role.member": "Member",
+    "role.adminOnly": "This action is admin-only",
+
+    "members.exportExcel": "📊 Export members Excel",
+    "members.downloadQr": "⬇ Download QR",
+    "members.shareQr": "↗ Share QR",
+    "members.softCopyNote": "Share this QR to their phone in case they forget the printed card",
   },
 };
 
 function getLang() {
-  return localStorage.getItem("ftw_lang") || "am";
+  const stored = localStorage.getItem("ftw_lang");
+  if (stored) return stored;
+  // automatic locale detection on first run only; user can still override
+  const nav = (navigator.language || "am").toLowerCase();
+  return nav.startsWith("am") ? "am" : "en";
 }
 function setLang(lang) {
   localStorage.setItem("ftw_lang", lang);

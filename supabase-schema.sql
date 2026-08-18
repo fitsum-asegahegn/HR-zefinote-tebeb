@@ -37,6 +37,27 @@ create table if not exists hr_events (
   updated_at timestamptz default now()
 );
 
+-- Role-based access control: every signed-up user is 'member' by default;
+-- promote someone to 'admin' manually in the Table Editor (or via SQL:
+-- update user_roles set role='admin' where user_id='...').
+create table if not exists user_roles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('admin','member')),
+  updated_at timestamptz default now()
+);
+
+create or replace function handle_new_user() returns trigger as $$
+begin
+  insert into public.user_roles (user_id, role) values (new.id, 'member');
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure handle_new_user();
+
 -- keep updated_at fresh on every write, needed for incremental sync
 create or replace function set_updated_at() returns trigger as $$
 begin
@@ -57,18 +78,48 @@ drop trigger if exists trg_hrevents_updated on hr_events;
 create trigger trg_hrevents_updated before update on hr_events
   for each row execute procedure set_updated_at();
 
--- RLS: any signed-in HR team member can read/write everything.
--- Good enough for a small internal team sharing one Supabase project;
--- tighten later if you need per-role restrictions.
+-- RLS: any signed-in HR team member can read/write members & attendance.
+-- Deleting members is admin-only (enforced both here and, defensively, in
+-- the app UI which hides the delete button for non-admins).
 alter table members enable row level security;
 alter table attendance enable row level security;
 alter table hr_events enable row level security;
+alter table user_roles enable row level security;
 
-create policy "authenticated full access members" on members
-  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create or replace function is_admin() returns boolean as $$
+  select exists (
+    select 1 from user_roles where user_id = auth.uid() and role = 'admin'
+  );
+$$ language sql security definer stable;
 
-create policy "authenticated full access attendance" on attendance
-  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "authenticated read members" on members
+  for select using (auth.role() = 'authenticated');
+create policy "authenticated insert members" on members
+  for insert with check (auth.role() = 'authenticated');
+create policy "authenticated update members" on members
+  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "admin delete members" on members
+  for delete using (is_admin());
+
+create policy "authenticated read attendance" on attendance
+  for select using (auth.role() = 'authenticated');
+create policy "authenticated insert attendance" on attendance
+  for insert with check (auth.role() = 'authenticated');
+create policy "authenticated update attendance" on attendance
+  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "admin delete attendance" on attendance
+  for delete using (is_admin());
 
 create policy "authenticated full access hr_events" on hr_events
-  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+  for select using (auth.role() = 'authenticated');
+create policy "authenticated write hr_events" on hr_events
+  for insert with check (auth.role() = 'authenticated');
+create policy "authenticated update hr_events" on hr_events
+  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "admin delete hr_events" on hr_events
+  for delete using (is_admin());
+
+create policy "read own role" on user_roles
+  for select using (auth.uid() = user_id);
+create policy "admin manage roles" on user_roles
+  for update using (is_admin()) with check (is_admin());
