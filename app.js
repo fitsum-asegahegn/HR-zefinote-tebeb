@@ -1057,6 +1057,7 @@ async function renderPlan() {
   const items = await getAll("planItems");
   const main = items.filter((p) => p.category === "main").sort((a, b) => a.no - b.no);
   const internal = items.filter((p) => p.category === "internal").sort((a, b) => a.no - b.no);
+  const isAdmin = window.currentUserRole === "admin" || !sbClient; // no cloud = single-device use, treat as admin
 
   function itemRow(p) {
     const today = todayISO();
@@ -1086,21 +1087,23 @@ async function renderPlan() {
 
     <div class="chart-box" style="height:auto;padding:14px;">
       <h3 class="section-title" style="margin-top:0;">${t("report.title")}</h3>
-      <p class="muted">${t("report.desc")}</p>
-      <label class="muted">${t("report.period")}</label>
-      <select id="reportPeriod" class="text-input">
-        <option value="3">${t("report.period3")}</option>
-        <option value="6">${t("report.period6")}</option>
-        <option value="12">${t("report.period12")}</option>
-      </select>
-      <label class="muted">${t("report.format")}</label>
-      <select id="reportFormat" class="text-input">
-        <option value="both">${t("report.formatBoth")}</option>
-        <option value="word">${t("report.formatWord")}</option>
-        <option value="ppt">${t("report.formatPpt")}</option>
-      </select>
-      <button id="reportGenerateBtn" class="btn-primary" style="width:100%;">${t("report.generate")}</button>
-      <p class="muted" id="reportStatus" style="min-height:16px;margin-top:8px;"></p>
+      ${isAdmin ? `
+        <p class="muted">${t("report.desc")}</p>
+        <label class="muted">${t("report.period")}</label>
+        <select id="reportPeriod" class="text-input">
+          <option value="3">${t("report.period3")}</option>
+          <option value="6">${t("report.period6")}</option>
+          <option value="12">${t("report.period12")}</option>
+        </select>
+        <label class="muted">${t("report.format")}</label>
+        <select id="reportFormat" class="text-input">
+          <option value="both">${t("report.formatBoth")}</option>
+          <option value="word">${t("report.formatWord")}</option>
+          <option value="ppt">${t("report.formatPpt")}</option>
+        </select>
+        <button id="reportGenerateBtn" class="btn-primary" style="width:100%;">${t("report.generate")}</button>
+        <p class="muted" id="reportStatus" style="min-height:16px;margin-top:8px;"></p>
+      ` : `<p class="muted">${t("report.adminOnly")}</p>`}
     </div>
 
     <h3 class="section-title">${t("plan.mainSection")}</h3>
@@ -1124,7 +1127,7 @@ async function renderPlan() {
     await ensurePlanItems();
     renderPlan();
   };
-  el("reportGenerateBtn").onclick = () => runReportGeneration();
+  if (el("reportGenerateBtn")) el("reportGenerateBtn").onclick = () => runReportGeneration();
 }
 window.doPlanDone = async (id) => { const note = prompt(t("plan.doneNotePrompt")) || ""; await markPlanItemDone(id, note); renderPlan(); };
 window.editPlanTiming = async (id) => {

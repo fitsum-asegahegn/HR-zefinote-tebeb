@@ -59,6 +59,7 @@ const I18N = {
     "report.generating": "እየተዘጋጀ ነው...",
     "report.done": "ተዘጋጅቷል ✓ ወርዷል",
     "report.error": "ሪፖርት ማዘጋጀት አልተቻለም",
+    "report.adminOnly": "የክፍለ ጊዜ ሪፖርት ማመንጨት ለአስተዳዳሪ ብቻ ነው",
 
     "scan.programLabel": "መርሐ ግብር",
     "scan.startCamera": "📷 ካሜራ ጀምር",
@@ -243,6 +244,7 @@ const I18N = {
     "report.generating": "Generating...",
     "report.done": "Done ✓ downloaded",
     "report.error": "Could not generate report",
+    "report.adminOnly": "Report generation is admin-only",
 
     "scan.programLabel": "Program",
     "scan.startCamera": "📷 Start camera",

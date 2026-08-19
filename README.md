@@ -171,6 +171,13 @@ different class sizes are still comparable. The same chart, table, and
 narrative are included in every generated period report.
 
 ## One-button period reports (Word / PowerPoint / both)
+**Admin-only** (same `user_roles` mechanism as delete): only your account
+sees the report generator on the ዕቅድ tab; other signed-in members can
+still view/update the plan itself but get a note instead of the
+generator. In offline-only mode (no Supabase connected) there's no
+shared team to restrict from, so it's shown to whoever's using that
+device.
+
 ዕቅድ tab → pick 3/6/12 months and Word/PPT/Both → 🖨 Generate. Built
 entirely client-side (no server) from real data:
 - Overall stats for the period (members, new members, sessions held,
