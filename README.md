@@ -130,6 +130,62 @@ it holds even if someone calls the API directly. In offline-only mode
 (no Supabase connected) this restriction doesn't apply since there's no
 shared database to protect.
 
+## The plan is now built into the system (ዕቅድ tab)
+The exact 18-item plan from `የሰው_ሀብት_ክፍል_ዕቅድ.docx` (13 main Article-20 items
++ 5 internal team-cohesion items) is seeded automatically on first load —
+the Dashboard's reminder section now shows these real items, not a
+generic placeholder.
+
+- **Import from Excel:** ዕቅድ tab → Import Excel. Columns recognized (any
+  of): `ተ.ቁ`/`No`, `ንዑስ ክፍል`/`Sub-unit`, `ዕቅድ/ፕሮጀክት`/`Title`, `የክንውን
+  ዝርዝር`/`Details`, `ውጤት`/`Outcome`, `አመልካች`/`Indicator`, `መለኪያ`/`Target`,
+  `የክንውን ጊዜ`/`Timing`, `ፈጻሚ አካል`/`Executor`, `በጀት`/`Budget`, and optionally
+  `ምድብ`/`Category` (`internal` routes it to the team-cohesion section,
+  anything else is treated as the main plan). Re-importing updates
+  existing rows matched by title + sub-unit rather than duplicating them.
+- **Export to Excel** any time to back up or hand-edit the current plan,
+  then re-import.
+- **Mark items done:** both the Dashboard and the ዕቅድ tab have a
+  "ተከናውኗል ✓" button — add a short note (e.g. "given to 12 members") and
+  it's logged with today's date. Recurring items (monthly meeting,
+  quarterly reports, etc.) automatically push their next-due date
+  forward; one-off/as-needed items just log the note.
+- **Edit timing/cadence** per item from the ዕቅድ tab — Ethiopian month
+  names in the plan text aren't converted to exact Gregorian recurrence
+  automatically, so double-check/adjust each item's "repeat every N
+  days" the first time you import.
+- **Reset to original:** ዕቅድ tab → "ወደ መጀመሪያው ዕቅድ መልስ" wipes any edits
+  and restores the exact docx-derived plan.
+
+## Grades 1–12
+Every member can now have a grade (1–12) — set it when adding a member
+manually, or via an Excel `ክፍል ደረጃ`/`Grade` column on import (`ክፍል`
+alone now always means grade, not the old free-text category). Members
+tab has a grade filter; the printed ID cards and the QR modal show grade
+too.
+
+Reports tab adds a **by-grade attendance-rate chart** and auto-generated
+comparison lines (e.g. "Grade 12 attended more than Grade 11"), computed
+as scans ÷ (students in that grade × sessions held) so grades with
+different class sizes are still comparable. The same chart, table, and
+narrative are included in every generated period report.
+
+## One-button period reports (Word / PowerPoint / both)
+ዕቅድ tab → pick 3/6/12 months and Word/PPT/Both → 🖨 Generate. Built
+entirely client-side (no server) from real data:
+- Overall stats for the period (members, new members, sessions held,
+  on-time/late attendance, confessions recorded, current absentee count)
+- Grade-level breakdown + narrative comparisons
+- Per-plan-item performance: how many times each item was marked done
+  in the period vs. how many times it was expected (from its recurrence
+  cadence), with a status (on track / in progress / needs attention /
+  done / manual tracking)
+
+The Word doc uses the `docx` library and the PowerPoint uses
+`PptxGenJS`, both loaded from CDN and cached by the service worker so
+report generation also works offline once the app has loaded online
+at least once.
+
 ## Background sync (best-effort)
 When a scan is recorded while offline, the app also registers a
 Background Sync tag so Chromium/Android browsers can push it up shortly
@@ -147,7 +203,8 @@ automatically via the regular online-event listener.
   cloud sync
 - `app.js` — IndexedDB, Excel import/export, QR gen/scan (batch queue),
   attendance rules, dashboard analytics, charts, notifications,
-  biometric unlock, tab routing, boot/auth orchestration
+  biometric unlock, plan management + grade analytics, Word/PPT report
+  generation, tab routing, boot/auth orchestration
 - `manifest.json`, `sw.js` — PWA installability, offline caching, and a
   best-effort Background Sync handler
   (bump the `CACHE` version string in `sw.js` whenever you redeploy

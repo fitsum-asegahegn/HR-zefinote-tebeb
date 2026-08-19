@@ -3,7 +3,7 @@
 
 // ---------- Constants ----------
 const DB_NAME = "finote_attendance";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 function PROGRAM_DEFS() {
   return [
     { key: "timhert", name: getLang() === "am" ? "ትምህርት (Course)" : "Course (ትምህርት)" },
@@ -51,6 +51,10 @@ function openDB() {
       if (!d.objectStoreNames.contains("hrEvents")) {
         d.createObjectStore("hrEvents", { keyPath: "id" });
       }
+      if (!d.objectStoreNames.contains("planItems")) {
+        const s = d.createObjectStore("planItems", { keyPath: "id" });
+        s.createIndex("category", "category", { unique: false });
+      }
     };
     req.onsuccess = (e) => resolve(e.target.result);
     req.onerror = (e) => reject(e.target.error);
@@ -84,46 +88,80 @@ async function ensurePrograms() {
     if (!existing) await put("programs", { key: p.key, name: p.name, startTime: "", graceMinutes: "" });
   }
 }
-async function ensureHrEvents() {
-  const existing = await getAll("hrEvents");
+// ---------- Plan (seeded exactly from የሰው ሀብት ክፍል ዕቅድ.docx) ----------
+// timing text is kept verbatim for display; recurrenceDays is a practical
+// heuristic for the dashboard due-date badge (Ethiopian-calendar month
+// names aren't converted to exact Gregorian dates — HR can always adjust
+// the cadence per item, or just use ተከናውኗል/mark-done manually).
+const DEFAULT_PLAN_MAIN = [
+  { no: 1, subUnit: "የአባላት አስተዳደር", title: "አዳዲስ አባላትን መመልመልና ማቀላቀል (ዲጂታል ዘመቻን ጨምሮ)", details: "ኦሪየንቴሽን ማዘጋጀት፤ በቴሌግራም/ማህበራዊ ሚዲያ/ድረ-ገጽ አዲስ አባላትን መሳብ፤ የአባላት መሠረታዊ መረጃ መሰብሰብ", outcome: "የአባላት ቁጥር እድገትና ተጨማሪ የሰው ኃይል", indicator: "የተመዘገቡ አዳዲስ አባላት ብዛት", metricTarget: "በቁጥር (ዒላማ ተቀምጦ)", timing: "መስከረም–ጥቅምት", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
+  { no: 2, subUnit: "የአባላት አስተዳደር", title: "የሰው ኃይል ድልድል ማዘጋጀት", details: "የተቀበሉ አባላትን ችሎታና ዝንባሌ መሠረት ያደረገ የአገልግሎት ምደባ ማዘጋጀት", outcome: "ትክክለኛና ውጤታማ ምደባ", indicator: "የተመደቡ አባላት ብዛት", metricTarget: "100%", timing: "ጥቅምት", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
+  { no: 3, subUnit: "የአባላት አስተዳደር", title: "የአቅም ግንባታ ስልጠና ማዘጋጀትና መስጠት", details: "ንዑስ ክፍላትን በርዕስ መመደብ፤ አሰልጣኝ መምረጥ፤ ክፍለ ጊዜ ወስኖ ስልጠና መስጠት፤ ከሌሎች ክፍላት ጋር በመተባበር", outcome: "የተሻለ ክህሎትና አቅም ያላቸው አባላት", indicator: "የተሰጡ ስልጠናዎች ብዛት", metricTarget: "100% አፈጻጸም", timing: "ነሐሴ/እንደአስፈላጊነቱ", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
+  { no: 4, subUnit: "የአባላት አስተዳደር", title: "የአመራር ማፍሪያ ሥርዓት (ንዑ.አን. ፳/3.13, 3.20)", details: "አባላትን በሥነ-ልቦናና በክህሎት ለአመራርነት ማዘጋጀት፤ ማበረታቻና ተጠያቂነት መሠረት ያደረገ አገልግሎት መተግበር", outcome: "ለቀጣይ አመራርነት የተዘጋጁ አባላት", indicator: "የተመረቁ/የሠለጠኑ ተሳታፊዎች", metricTarget: "በዓመት 1 ዙር", timing: "ግንቦት–ሰኔ", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
+  { no: 5, subUnit: "የአባላት አስተዳደር", title: "አዲስ አባላት አቀባበልና አቅጣጫ ማሳወቅ (ንዑ.አን. ፳/3.19)", details: "አዳዲስ አባላት የአገልግሎት ሕይወታቸውን እንዴት መምራት እንዳለባቸው መመሪያ መስጠት", outcome: "በትክክለኛ አቅጣጫ የገቡ አዲስ አባላት", indicator: "ኦሪየንቴሽን የወሰዱ ብዛት", metricTarget: "100%", timing: "እንደተቀላቀሉ ወዲያውኑ", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 0 },
+  { no: 6, subUnit: "የአባላት መረጃ", title: "የአባላት ፎርም ማስሞላትና መረጃ ማደራጀት", details: "ሁሉንም አባላት መረጃ ማደስ፣ ማደራጀት፤ ቅጽ ማዘጋጀትና በየጊዜው መያዝ", outcome: "የተደራጀ የአባላት ዘመናዊ መረጃ", indicator: "የተሞሉ ፎርሞች ብዛት", metricTarget: "100%", timing: "ጥቅምት፣ የካቲት፣ ከመስከረም–ነሐሴ", executor: "የአባላት መረጃ ንዑስ ክፍል", budget: "-", recurrenceDays: 91 },
+  { no: 7, subUnit: "የአባላት መረጃ", title: "የተሳትፎ (ስም) ቁጥጥር", details: "በመደበኛ መርሐ ግብራት ላይ ተገኝነትን በየጊዜው መመዝገብና ማጠናቀር", outcome: "ትክክለኛ የተሳትፎ መረጃ ለውሳኔ", indicator: "የተመዘገበ ተሳትፎ መጠን", metricTarget: "ወርሃዊ ሪፖርት", timing: "ከመስከረም–ነሐሴ", executor: "የአባላት መረጃ ንዑስ ክፍል", budget: "-", recurrenceDays: 30, autoMetric: "attendanceLogged" },
+  { no: 8, subUnit: "የአባላት መረጃ", title: "በየሩብ ዓመቱ የጠፉ/የራቁ አባላትን መለየትና መመለስ", details: "በመርሐግብራት የማይገኙ አባላትን መለየት፤ በስልክና ደብዳቤ መጥራት፤ ምክንያታቸውን አጥንቶ በምክር መመለስ", outcome: "አባላትን ወደ አገልግሎት መመለስ", indicator: "የተመለሱ አባላት ብዛት", metricTarget: "100%", timing: "በየሩብ ዓመቱ", executor: "የአባላት መረጃ ንዑስ ክፍል", budget: "-", recurrenceDays: 91, autoMetric: "absentees" },
+  { no: 9, subUnit: "ምክረ አበው", title: "የንስሃና ቁርባን ሕይወት ክትትል", details: "አባላት ንስሃ አባት እንዲኖራቸው ማድረግ፤ የንስሃና ቁርባን ሕይወታቸውን ማጠናከር", outcome: "የተጠናከረ መንፈሳዊ ሕይወት", indicator: "የንስሃና ቁርባን ተሳትፎ መጠን", metricTarget: "100%", timing: "ከመስከረም–ነሐሴ", executor: "ምክረ አበው ንዑስ ክፍል", budget: "-", recurrenceDays: 30, autoMetric: "confession" },
+  { no: 10, subUnit: "ምክረ አበው", title: "ሚስጥራዊ የምክር አገልግሎት መስመር (ንዑ.አን. ፳/3.16-3.17)", details: "ታማኝና ሚስጥር ጠባቂ የመረጃ ፍሰት መፍጠር፤ በሐዘን/በደስታ ጊዜ የሞራል ድጋፍና ምክር መስጠት", outcome: "የተደገፉ አባላት", indicator: "ምክር የተሰጣቸው አባላት ብዛት", metricTarget: "እንደአስፈላጊነቱ", timing: "ዓመቱን ሙሉ", executor: "ምክረ አበው ንዑስ ክፍል", budget: "-", recurrenceDays: 0 },
+  { no: 11, subUnit: "ምክረ አበው", title: "በአባላት መካከል የሚፈጠሩ አለመግባባቶችን መፍታት", details: "አለመግባባቶች በክርስቲያናዊ ፍቅርና በምክር እንዲታረቁ ማድረግ", outcome: "የተረጋጋ የአገልግሎት ከባቢ", indicator: "የተፈቱ አለመግባባቶች ብዛት", metricTarget: "100% አፈጻጸም", timing: "እንደአስፈላጊነቱ", executor: "ምክረ አበው ንዑስ ክፍል", budget: "-", recurrenceDays: 0 },
+  { no: 12, subUnit: "ህጻናትና ታዳጊ ክትትል", title: "ከሕጻናትና ታዳጊ ክፍል (አንቀጽ ፳፭) ጋር ተቀናጅቶ የአባልነት ሽግግር ክትትል", details: "ከ8ኛ ክፍል በላይ ወደ ወጣት ክፍል የሚሸጋገሩ ታዳጊዎችን፣ እንዲሁም ከ18 ዓመት በላይ ወደ መደበኛ አባልነት የሚሸጋገሩትን በጋራ ማወዳደር (ንዑ.አን. ፳/3.4-3.5 እና አንቀጽ ፯)", outcome: "ያለክፍተት የተስተካከለ የዕድሜ ደረጃ ሽግግር", indicator: "የተሸጋገሩ አባላት ብዛት", metricTarget: "100%", timing: "በየሩብ ዓመቱ", executor: "ህጻናትና ታዳጊ ክትትል ንዑስ ክፍል / ከሕጻናትና ታዳጊ ክፍል ጋር", budget: "-", recurrenceDays: 91 },
+  { no: 13, subUnit: "ጽ/ቤት (አጠቃላይ)", title: "የ3 ወር አፈጻጸም ሪፖርትና መለኪያ", details: "የክፍሉን የስራ አፈጻጸም በየሦስት ወሩ መለካትና ሪፖርት ማዘጋጀት፤ ለስራ አመራር ማቅረብ፤ ክፍተት ተለይቶ የእርምት አቅጣጫ ማስቀመጥ", outcome: "ግልጽ የስራ ክንውን ግምገማ", indicator: "የቀረቡ ሪፖርቶች ብዛት", metricTarget: "4 ሪፖርቶች", timing: "ህዳር፣ የካቲት፣ ግንቦት፣ ነሐሴ", executor: "የሰው ሀብት አስተዳደር ክፍል ጽ/ቤት", budget: "-", recurrenceDays: 91 },
+];
+const DEFAULT_PLAN_INTERNAL = [
+  { no: 1, subUnit: "የክፍል ውስጥ ግንኙነት", title: "ወርሃዊ የክፍል ስብሰባና የልምድ ልውውጥ", details: "አራቱም ንዑስ ክፍላት (የአባላት አስተዳደር፣ የአባላት መረጃ፣ ምክረ አበው፣ ህጻናትና ታዳጊ ክትትል) በወር አንድ ጊዜ ተሰብስበው የሥራ ልምዳቸውን ይለዋወጣሉ፤ ችግር ካለ በጋራ ይመክራሉ", outcome: "የተጠናከረ የውስጥ ትብብር", indicator: "የተካሄዱ ስብሰባዎች", metricTarget: "12 ስብሰባ", timing: "ወርሃዊ", executor: "የክፍሉ ጽ/ቤት", budget: "-", recurrenceDays: 30 },
+  { no: 2, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ አጋፔ / ግንኙነት ቀን", details: "ለክፍሉ አባላት ብቻ የተዘጋጀ የምግብ/የህብረት ቀን፤ ከስራ ውጪ በሆነ መንፈስ እንዲተዋወቁና እንዲቀራረቡ ማድረግ", outcome: "የጠነከረ ወንድማዊ/እህታዊ ፍቅር በክፍሉ ውስጥ", indicator: "የተዘጋጁ አጋፔዎች", metricTarget: "በዓመት 2 ጊዜ", timing: "ጥር እና ሰኔ", executor: "የክፍሉ ጽ/ቤት", budget: "እንደ ዕቅድ", recurrenceDays: 182 },
+  { no: 3, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ መንፈሳዊ ጉዞ", details: "የክፍሉ አባላት ብቻ ወደ ገዳም/ቅዱስ ቦታ አብረው የሚሄዱበት ጉዞ ማዘጋጀት፤ ከሥራ ግንኙነት ባለፈ መንፈሳዊና ማህበራዊ ትስስር መፍጠር", outcome: "የተጠናከረ የክፍሉ አንድነት", indicator: "የተካሄዱ ጉዞዎች", metricTarget: "በዓመት 1 ጊዜ", timing: "ክረምት", executor: "የክፍሉ ጽ/ቤት", budget: "እንደ ዕቅድ", recurrenceDays: 365 },
+  { no: 4, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የውስጥ እውቅናና ማበረታቻ", details: "በየንዑስ ክፍሉ በትጋት ላገለገሉ የክፍሉ አባላት ውስጣዊ (ከቀሪው ሰ/ት/ቤት ተለይቶ) የምስጋና/የእውቅና መርሐ ግብር ማዘጋጀት", outcome: "የተነቃቃ የአገልግሎት መንፈስ በክፍሉ ውስጥ", indicator: "የተሸለሙ/የተመሰገኑ አባላት ብዛት", metricTarget: "በዓመት 1 ጊዜ", timing: "ነሐሴ (ከሪፖርት ጋር)", executor: "የክፍሉ ጽ/ቤት", budget: "-", recurrenceDays: 365 },
+  { no: 5, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ ደስታ/ሐዘን መጠያየቅ", details: "ከክፍሉ አባላት አንዱ ደስታ (ሰርግ፣ ምረቃ) ወይም ሐዘን ሲያጋጥመው ክፍሉ በራሱ ተነሳሽነት (ከቤ/ክ አጠቃላይ አገልግሎት ተለይቶ) የቅርብ መጠያየቅ እንዲያደርግ ማመቻቸት", outcome: "እርስ በርስ የመደጋገፍ ልማድ", indicator: "የተደረጉ ጉብኝቶች", metricTarget: "እንደአጋጣሚው", timing: "ዓመቱን ሙሉ", executor: "የክፍሉ ጽ/ቤት", budget: "-", recurrenceDays: 0 },
+];
+
+async function ensurePlanItems() {
+  const existing = await getAll("planItems");
   if (existing.length) return;
   const today = new Date();
-  const defaults = [
-    { titleKey: "hr.monthlyMeeting", recurrenceDays: 30 },
-    { titleKey: "hr.agapeDay", recurrenceDays: 182 },
-    { titleKey: "hr.spiritualTrip", recurrenceDays: 365 },
-    { titleKey: "hr.recognition", recurrenceDays: 365 },
-    { titleKey: "hr.celebrationCheckin", recurrenceDays: 0 },
-  ];
-  for (const d of defaults) {
-    const next = d.recurrenceDays > 0 ? addDays(today, 14) : null;
-    await put("hrEvents", { id: uid(), titleKey: d.titleKey, recurrenceDays: d.recurrenceDays, nextDate: next ? isoDate(next) : null, lastDone: null });
-  }
+  const seedRow = async (row, category) => {
+    const next = row.recurrenceDays > 0 ? addDays(today, 14) : null;
+    await put("planItems", {
+      id: uid(), no: row.no, category, subUnit: row.subUnit, title: row.title, details: row.details,
+      outcome: row.outcome, indicator: row.indicator, metricTarget: row.metricTarget, timing: row.timing,
+      executor: row.executor, budget: row.budget, recurrenceDays: row.recurrenceDays, autoMetric: row.autoMetric || null,
+      nextDate: next ? isoDate(next) : null, lastDone: null, doneLog: [],
+    });
+  };
+  for (const row of DEFAULT_PLAN_MAIN) await seedRow(row, "main");
+  for (const row of DEFAULT_PLAN_INTERNAL) await seedRow(row, "internal");
 }
-const HR_EVENT_LABELS = {
-  am: {
-    "hr.monthlyMeeting": ["ወርሃዊ የክፍል ስብሰባና የልምድ ልውውጥ", "አራቱም ንዑስ ክፍላት ተሰብስበው ይመካከራሉ"],
-    "hr.agapeDay": ["የክፍል ውስጥ አጋፔ / ግንኙነት ቀን", "ለክፍሉ አባላት ብቻ"],
-    "hr.spiritualTrip": ["የክፍል ውስጥ መንፈሳዊ ጉዞ", "በክረምት"],
-    "hr.recognition": ["የውስጥ እውቅናና ማበረታቻ", "ለታታሪ አባላት"],
-    "hr.celebrationCheckin": ["የክፍል ውስጥ ደስታ/ሐዘን መጠያየቅ", "እንደአጋጣሚው — በእጅ ብቻ ይታወሳል"],
-  },
-  en: {
-    "hr.monthlyMeeting": ["Monthly team meeting & experience sharing", "All 4 sub-units gather to discuss"],
-    "hr.agapeDay": ["Internal agape / connection day", "For department members only"],
-    "hr.spiritualTrip": ["Internal spiritual trip", "During summer break"],
-    "hr.recognition": ["Internal recognition & appreciation", "For members who served diligently"],
-    "hr.celebrationCheckin": ["Internal celebration/condolence check-ins", "As needed — tracked manually"],
-  },
-};
-function hrLabel(titleKey) {
-  const lang = getLang();
-  return (HR_EVENT_LABELS[lang] && HR_EVENT_LABELS[lang][titleKey]) || HR_EVENT_LABELS.am[titleKey] || [titleKey, ""];
+
+function guessRecurrenceDays(timingText) {
+  const s = (timingText || "").trim();
+  if (/ወርሃዊ|በየወሩ|monthly/i.test(s)) return 30;
+  if (/ሩብ ዓመት|quarterly/i.test(s)) return 91;
+  if (/2 ጊዜ|twice/i.test(s)) return 182;
+  if (/እንደአስፈላጊነቱ|እንደአጋጣሚው|as needed|as-needed/i.test(s)) return 0;
+  return 365; // default: treat as an annual/seasonal item
+}
+
+async function computePlanReminders() {
+  const items = await getAll("planItems");
+  const today = todayISO();
+  return items.filter((e) => e.nextDate).map((e) => ({ ...e, overdue: e.nextDate <= today })).sort((a, b) => (a.nextDate || "9999").localeCompare(b.nextDate || "9999"));
+}
+async function markPlanItemDone(id, note) {
+  const e = await get("planItems", id);
+  if (!e) return;
+  const today = todayISO();
+  e.lastDone = today;
+  e.doneLog = e.doneLog || [];
+  e.doneLog.push({ date: today, note: note || "" });
+  if (e.recurrenceDays > 0) e.nextDate = isoDate(addDays(new Date(), e.recurrenceDays));
+  await put("planItems", e);
 }
 
 // ---------- Date helpers ----------
 function isoDate(d) { const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; }
 function addDays(d, n) { const nd = new Date(d); nd.setDate(nd.getDate() + n); return nd; }
+function addMonths(d, n) { const nd = new Date(d); nd.setMonth(nd.getMonth() + n); return nd; }
 function todayISO() { return isoDate(new Date()); }
 function fmtDT(iso) { const d = new Date(iso); return d.toLocaleString(getLang() === "en" ? "en-GB" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
@@ -139,19 +177,22 @@ async function importMembersFromWorkbook(file) {
     const name = pick(row, ["ሙሉ ስም", "ስም", "Name", "Full Name", "name"]);
     if (!name) continue;
     const phone = pick(row, ["ስልክ", "ስልክ ቁጥር", "Phone", "phone"]);
-    const category = pick(row, ["ምድብ", "ክፍል", "Category", "category"]) || "";
+    const category = pick(row, ["ምድብ", "Category", "category"]) || "";
+    const gradeRaw = pick(row, ["ክፍል ደረጃ", "ክፍል", "Grade", "grade"]);
+    const grade = normalizeGrade(gradeRaw);
     const confDate = pick(row, ["ንስሃ ቀን", "የመጨረሻ ንስሃ", "Last Confession", "lastConfession"]);
     let member = existingList.find((m) => m.fullName.trim() === String(name).trim());
     if (!member) {
       member = {
         id: uid(), qrId: "FTW1|" + shortId(), fullName: String(name).trim(),
-        phone: phone ? String(phone).trim() : "", category: String(category).trim(),
+        phone: phone ? String(phone).trim() : "", category: String(category).trim(), grade,
         lastConfessionDate: parseMaybeDate(confDate), joinDate: todayISO(), active: true, synced: false,
       };
       existingList.push(member);
     } else {
       member.phone = phone ? String(phone).trim() : member.phone;
       member.category = category ? String(category).trim() : member.category;
+      if (grade !== null) member.grade = grade;
       if (confDate) member.lastConfessionDate = parseMaybeDate(confDate);
       member.synced = false;
     }
@@ -167,8 +208,17 @@ function parseMaybeDate(v) {
   const d = new Date(String(v).trim());
   return !isNaN(d.getTime()) ? isoDate(d) : null;
 }
-async function addMemberManual(fullName, phone, category) {
-  const member = { id: uid(), qrId: "FTW1|" + shortId(), fullName: fullName.trim(), phone: (phone || "").trim(), category: (category || "").trim(), lastConfessionDate: null, joinDate: todayISO(), active: true, synced: false };
+function normalizeGrade(v) {
+  if (v === undefined || v === null || v === "") return null;
+  const n = parseInt(String(v).replace(/[^\d]/g, ""), 10);
+  return (n >= 1 && n <= 12) ? n : null;
+}
+async function addMemberManual(fullName, phone, category, grade) {
+  const member = {
+    id: uid(), qrId: "FTW1|" + shortId(), fullName: fullName.trim(), phone: (phone || "").trim(),
+    category: (category || "").trim(), grade: normalizeGrade(grade),
+    lastConfessionDate: null, joinDate: todayISO(), active: true, synced: false,
+  };
   await put("members", member);
   return member;
 }
@@ -243,17 +293,46 @@ async function computeConfessionDue() {
   }
   return due;
 }
-async function computeHrEventsDue() {
-  const events = await getAll("hrEvents");
-  const today = todayISO();
-  return events.filter((e) => e.nextDate).map((e) => ({ ...e, overdue: e.nextDate <= today })).sort((a, b) => (a.nextDate || "9999").localeCompare(b.nextDate || "9999"));
+
+// ---------- Grade-level analytics (grades 1-12) ----------
+async function computeGradeStats(startISO, endISO) {
+  const [members, attendanceAll] = await Promise.all([getAll("members"), getAll("attendance")]);
+  const attendance = attendanceAll.filter((a) => a.sessionDate >= startISO && a.sessionDate <= endISO);
+  const sessionDates = [...new Set(attendance.map((a) => a.sessionDate))];
+  const totalSessions = sessionDates.length || 1;
+
+  const memberGrade = new Map(members.map((m) => [m.id, m.grade]));
+  const gradeMap = {};
+  for (let g = 1; g <= 12; g++) gradeMap[g] = { grade: g, memberCount: 0, scans: 0, onTime: 0, late: 0 };
+  members.forEach((m) => { if (m.grade >= 1 && m.grade <= 12 && m.active !== false) gradeMap[m.grade].memberCount++; });
+  attendance.forEach((a) => {
+    const g = memberGrade.get(a.memberId);
+    if (g >= 1 && g <= 12) {
+      gradeMap[g].scans++;
+      if (a.status === "on-time") gradeMap[g].onTime++; else gradeMap[g].late++;
+    }
+  });
+  const rows = Object.values(gradeMap)
+    .map((r) => ({ ...r, rate: r.memberCount ? r.scans / (r.memberCount * totalSessions) : 0 }))
+    .filter((r) => r.memberCount > 0)
+    .sort((a, b) => b.rate - a.rate);
+  return { rows, totalSessions };
 }
-async function markHrEventDone(id) {
-  const e = await get("hrEvents", id);
-  if (!e) return;
-  e.lastDone = todayISO();
-  if (e.recurrenceDays > 0) e.nextDate = isoDate(addDays(new Date(), e.recurrenceDays));
-  await put("hrEvents", e);
+function buildGradeNarrative(rows, lang) {
+  const byGrade = {};
+  rows.forEach((r) => (byGrade[r.grade] = r));
+  const lines = [];
+  for (let g = 1; g < 12; g++) {
+    const a = byGrade[g], b = byGrade[g + 1];
+    if (!a || !b || a.rate === b.rate) continue;
+    const higherIsA = a.rate > b.rate;
+    const higher = higherIsA ? a : b, lower = higherIsA ? b : a;
+    const hp = (higher.rate * 100).toFixed(0), lp = (lower.rate * 100).toFixed(0);
+    lines.push(lang === "am"
+      ? `ክፍል ${higher.grade} (${hp}%) ከክፍል ${lower.grade} (${lp}%) የበለጠ ተሳትፎ አሳይተዋል`
+      : `Grade ${higher.grade} (${hp}%) attended more than Grade ${lower.grade} (${lp}%)`);
+  }
+  return lines;
 }
 
 // ---------- JSON export/import (works with or without Supabase) ----------
@@ -316,7 +395,7 @@ window.toggleLang = function () {
 
 // ---------- Dashboard ----------
 async function renderDashboard() {
-  const [absentees, confessionDue, hrDue, settings] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computeHrEventsDue(), getSettings()]);
+  const [absentees, confessionDue, hrDue, settings] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(), getSettings()]);
   const members = await getAll("members");
   const attendance = await getAll("attendance");
   const today = todayISO();
@@ -346,18 +425,23 @@ async function renderDashboard() {
       </div>`).join("")}</div>` : `<p class="muted">${t("dash.noConfessionDue")}</p>`}
 
     <h3 class="section-title">${t("dash.hrTitle")}</h3>
-    <div class="list">${hrDue.map(e => { const [title, note] = hrLabel(e.titleKey); return `
+    <div class="list">${hrDue.map(e => `
       <div class="list-row">
-        <div><b>${title}</b><br><span class="muted">${note} ${e.nextDate ? "— " + t("dash.expected") + ": " + e.nextDate : ""}</span></div>
+        <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + e.nextDate : ""}</span></div>
         <div class="row-actions">
           ${e.overdue ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
-          ${e.recurrenceDays > 0 ? `<button class="btn-small" onclick="doneHrEvent('${e.id}')">${t("dash.markDone")}</button>` : ""}
+          <button class="btn-small" onclick="doneHrEvent('${e.id}')">${t("dash.markDone")}</button>
         </div>
-      </div>`; }).join("")}</div>
+      </div>`).join("")}</div>
+    <p class="muted" style="margin-top:6px;"><a href="#" onclick="setTab('plan');return false;" style="color:var(--amber);">${t("dash.viewFullPlan")}</a></p>
   `;
 }
 window.markConfessed = async (memberId) => { const m = await get("members", memberId); m.lastConfessionDate = todayISO(); m.synced = false; await put("members", m); renderDashboard(); };
-window.doneHrEvent = async (id) => { await markHrEventDone(id); renderDashboard(); };
+window.doneHrEvent = async (id) => {
+  const note = prompt(t("plan.doneNotePrompt")) || "";
+  await markPlanItemDone(id, note);
+  renderDashboard();
+};
 
 // ---------- Scan (batch queue: scan several, review, then confirm all at once) ----------
 async function renderScan() {
@@ -504,6 +588,10 @@ async function renderMembers() {
       <button class="btn-secondary" id="exportMembersBtn">${t("members.exportExcel")}</button>
     </div>
     <input id="memberSearch" class="text-input" placeholder="${t("members.searchPlaceholder")}"/>
+    <select id="gradeFilter" class="text-input">
+      <option value="">${t("members.allGrades")}</option>
+      ${Array.from({ length: 12 }, (_, i) => i + 1).map((g) => `<option value="${g}">${t("members.gradeShort", { n: g })}</option>`).join("")}
+    </select>
     <div id="memberList" class="list"></div>
     <div id="printArea" class="print-only"></div>
   `;
@@ -511,21 +599,28 @@ async function renderMembers() {
     const isAdmin = window.currentUserRole === "admin" || !sbClient; // no cloud = no RBAC, allow local admin actions
     el("memberList").innerHTML = list.map((m) => `
       <div class="list-row">
-        <div><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""}</span></div>
+        <div><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""} ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}</span></div>
         <div class="row-actions">
           <button class="btn-small" onclick="showQr('${m.id}')">${t("members.qr")}</button>
           ${isAdmin ? `<button class="btn-small" onclick="deleteMember('${m.id}')">${t("members.delete")}</button>` : ""}
         </div>
       </div>`).join("");
   }
+  function applyFilters() {
+    const q = el("memberSearch").value.toLowerCase();
+    const g = el("gradeFilter").value;
+    draw(members.filter((m) => m.fullName.toLowerCase().includes(q) && (g === "" || String(m.grade) === g)));
+  }
   draw(members);
-  el("memberSearch").oninput = (e) => { const q = e.target.value.toLowerCase(); draw(members.filter((m) => m.fullName.toLowerCase().includes(q))); };
+  el("memberSearch").oninput = applyFilters;
+  el("gradeFilter").onchange = applyFilters;
   el("excelInput").onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const count = await importMembersFromWorkbook(file); alert(t("members.importedCount", { n: count })); renderMembers(); };
   el("addMemberBtn").onclick = async () => {
     const name = prompt(t("members.promptName")); if (!name) return;
     const phone = prompt(t("members.promptPhone")) || "";
     const category = prompt(t("members.promptCategory")) || "";
-    await addMemberManual(name, phone, category); renderMembers();
+    const grade = prompt(t("members.promptGrade")) || "";
+    await addMemberManual(name, phone, category, grade); renderMembers();
   };
   el("printQrBtn").onclick = () => printAllQr(members);
   el("exportMembersBtn").onclick = () => exportMembersExcel(members);
@@ -542,6 +637,7 @@ window.showQr = async (id) => {
   box.innerHTML = `
     <div class="modal-inner">
       <h3>${m.fullName}</h3>
+      ${m.grade ? `<p class="muted" style="margin-top:-8px;">${t("members.gradeShort", { n: m.grade })}</p>` : ""}
       <div id="qrBox"></div>
       <p class="muted" style="max-width:220px;">${t("members.softCopyNote")}</p>
       <div class="row-actions" style="justify-content:center;margin-top:8px;">
@@ -584,7 +680,7 @@ async function shareQrPng(qrBoxEl, name) {
 
 async function exportMembersExcel(members) {
   const rows = members.map((m) => ({
-    Name: m.fullName, Phone: m.phone || "", Category: m.category || "",
+    Name: m.fullName, Phone: m.phone || "", Category: m.category || "", Grade: m.grade || "",
     LastConfession: m.lastConfessionDate || "", JoinDate: m.joinDate || "", QrId: m.qrId,
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -610,7 +706,7 @@ async function printAllQr(members) {
       card.appendChild(qrHalf);
       const infoHalf = document.createElement("div");
       infoHalf.className = "info-half";
-      infoHalf.innerHTML = `<div class="photo-box"></div><div class="id-name">${m.fullName}</div><div class="id-org">ፍኖተ ጥበብ ሰ/ት/ቤት</div>`;
+      infoHalf.innerHTML = `<div class="photo-box"></div><div class="id-name">${m.fullName}</div><div class="id-org">${m.grade ? t("members.gradeShort", { n: m.grade }) + " · " : ""}ፍኖተ ጥበብ ሰ/ት/ቤት</div>`;
       card.appendChild(infoHalf);
       page.appendChild(card);
       new QRCode(qrHalf, { text: m.qrId, width: 240, height: 240 });
@@ -741,7 +837,7 @@ async function checkAndNotify() {
   const settings = await getSettings();
   if (!settings.notificationsEnabled) return;
   if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const [absentees, confessionDue, hrDue] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computeHrEventsDue()]);
+  const [absentees, confessionDue, hrDue] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders()]);
   const overdueHr = hrDue.filter((e) => e.overdue);
   const parts = [];
   if (absentees.length) parts.push(`${absentees.length} ${getLang() === "am" ? "ተከታታይ ቀሪ" : "on an absence streak"}`);
@@ -817,6 +913,10 @@ async function renderReports() {
   const members = await getAll("members");
   const memberMap = new Map(members.map((m) => [m.id, m]));
   const progs = PROGRAM_DEFS();
+  const earliestDate = attendance.length ? attendance.reduce((min, a) => (a.sessionDate < min ? a.sessionDate : min), attendance[0].sessionDate) : todayISO();
+  const gradeStats = await computeGradeStats(earliestDate, todayISO());
+  const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
+
   el("view").innerHTML = `
     <div class="toolbar"><button id="repExcel" class="btn-secondary">${t("reports.downloadExcel")}</button></div>
 
@@ -825,6 +925,10 @@ async function renderReports() {
 
     <h3 class="section-title">${t("charts.byProgram")}</h3>
     <div class="chart-box"><canvas id="progChart"></canvas></div>
+
+    <h3 class="section-title">${t("charts.byGrade")}</h3>
+    <div class="chart-box"><canvas id="gradeChart"></canvas></div>
+    ${gradeNarrative.length ? `<div class="list">${gradeNarrative.map((l) => `<div class="list-row"><div class="muted">${l}</div></div>`).join("")}</div>` : `<p class="muted">${t("charts.noData")}</p>`}
 
     <h3 class="section-title">${t("reports.logTitle")}</h3>
     <div class="list">
@@ -836,10 +940,10 @@ async function renderReports() {
     </div>
   `;
   el("repExcel").onclick = exportAttendanceExcel;
-  drawCharts(attendance, progs);
+  drawCharts(attendance, progs, gradeStats);
 }
 
-function drawCharts(attendance, progs) {
+function drawCharts(attendance, progs, gradeStats) {
   destroyCharts();
   if (typeof Chart === "undefined") return;
 
@@ -877,10 +981,361 @@ function drawCharts(attendance, progs) {
   } else if (progCanvas) {
     progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
   }
+
+  // By grade (1-12): attendance rate = scans / (members in grade × sessions), makes uneven class sizes comparable
+  const gradeCanvas = el("gradeChart");
+  if (gradeStats && gradeStats.rows.length && gradeCanvas) {
+    const rowsAsc = [...gradeStats.rows].sort((a, b) => a.grade - b.grade);
+    chartInstances.push(new Chart(gradeCanvas, {
+      type: "bar",
+      data: {
+        labels: rowsAsc.map((r) => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade),
+        datasets: [{ label: t("charts.byGrade"), data: rowsAsc.map((r) => Math.round(r.rate * 100)), backgroundColor: "#f2a33c" }],
+      },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.y + "%" } } },
+        scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187", callback: (v) => v + "%" }, beginAtZero: true } },
+      },
+    }));
+  } else if (gradeCanvas) {
+    gradeCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
+  }
+}
+
+// ---------- Plan (ዕቅድ) tab: Excel import/export + completion tracking ----------
+async function importPlanFromWorkbook(file) {
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const existing = await getAll("planItems");
+  let count = 0;
+  for (const row of rows) {
+    const title = pick(row, ["ዕቅድ/ፕሮጀክት", "ዕቅድ", "Title", "Plan", "title"]);
+    if (!title) continue;
+    const subUnit = pick(row, ["ንዑስ ክፍል", "Sub-unit", "SubUnit", "subUnit"]) || "";
+    const details = pick(row, ["የክንውን ዝርዝር", "Details", "details"]) || "";
+    const outcome = pick(row, ["ውጤት", "Outcome", "outcome"]) || "";
+    const indicator = pick(row, ["አመልካች", "Indicator", "indicator"]) || "";
+    const metricTarget = pick(row, ["መለኪያ", "Target", "Metric", "metricTarget"]) || "";
+    const timing = pick(row, ["የክንውን ጊዜ", "Timing", "timing"]) || "";
+    const executor = pick(row, ["ፈጻሚ አካል", "Executor", "executor"]) || "";
+    const budget = pick(row, ["በጀት", "Budget", "budget"]) || "-";
+    const category = /internal|ውስጥ/i.test(pick(row, ["ምድብ", "Category", "category"]) || "") ? "internal" : "main";
+    const noRaw = pick(row, ["ተ.ቁ", "No", "no"]);
+    const no = noRaw ? Number(noRaw) || (count + 1) : (count + 1);
+
+    let item = existing.find((p) => p.title.trim() === String(title).trim() && p.subUnit === subUnit);
+    if (!item) {
+      item = { id: uid(), doneLog: [], lastDone: null, nextDate: null };
+      existing.push(item);
+    }
+    Object.assign(item, {
+      no, subUnit, title: String(title).trim(), details, outcome, indicator, metricTarget, timing,
+      executor, budget, category, recurrenceDays: guessRecurrenceDays(timing),
+    });
+    if (item.recurrenceDays > 0 && !item.nextDate) item.nextDate = isoDate(addDays(new Date(), 14));
+    await put("planItems", item);
+    count++;
+  }
+  return count;
+}
+async function exportPlanExcel() {
+  const items = (await getAll("planItems")).sort((a, b) => (a.category === b.category ? a.no - b.no : a.category.localeCompare(b.category)));
+  const rows = items.map((p) => ({
+    "ተ.ቁ": p.no, "ምድብ": p.category === "internal" ? "የውስጥ ግንኙነት" : "ዋና", "ንዑስ ክፍል": p.subUnit,
+    "ዕቅድ/ፕሮጀክት": p.title, "የክንውን ዝርዝር": p.details, "ውጤት": p.outcome, "አመልካች": p.indicator,
+    "መለኪያ": p.metricTarget, "የክንውን ጊዜ": p.timing, "ፈጻሚ አካል": p.executor, "በጀት": p.budget,
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Plan");
+  XLSX.writeFile(wb, `finote-hr-plan-${todayISO()}.xlsx`);
+}
+
+async function renderPlan() {
+  const items = await getAll("planItems");
+  const main = items.filter((p) => p.category === "main").sort((a, b) => a.no - b.no);
+  const internal = items.filter((p) => p.category === "internal").sort((a, b) => a.no - b.no);
+
+  function itemRow(p) {
+    const today = todayISO();
+    const overdue = p.nextDate && p.nextDate <= today;
+    const lastLog = p.doneLog && p.doneLog.length ? p.doneLog[p.doneLog.length - 1] : null;
+    return `
+      <div class="list-row" style="align-items:flex-start;">
+        <div style="flex:1;">
+          <b>${p.title}</b><br>
+          <span class="muted">${p.timing} · ${p.executor}</span><br>
+          <span class="muted">${t("plan.doneLogTitle")}: ${lastLog ? lastLog.date + (lastLog.note ? " — " + lastLog.note : "") : t("plan.noDoneLog")} (${(p.doneLog || []).length}x)</span>
+        </div>
+        <div class="row-actions" style="flex-direction:column;align-items:flex-end;gap:6px;">
+          ${overdue ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
+          <button class="btn-small" onclick="doPlanDone('${p.id}')">${t("plan.markDone")}</button>
+          <button class="btn-small" onclick="editPlanTiming('${p.id}')">${t("plan.editTiming")}</button>
+        </div>
+      </div>`;
+  }
+
+  el("view").innerHTML = `
+    <div class="toolbar">
+      <label class="btn-primary file-btn">${t("plan.importExcel")}<input type="file" id="planExcelInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
+      <button class="btn-secondary" id="planExportBtn">${t("plan.exportExcel")}</button>
+      <button class="btn-secondary" id="planResetBtn">${t("plan.resetToDefault")}</button>
+    </div>
+
+    <div class="chart-box" style="height:auto;padding:14px;">
+      <h3 class="section-title" style="margin-top:0;">${t("report.title")}</h3>
+      <p class="muted">${t("report.desc")}</p>
+      <label class="muted">${t("report.period")}</label>
+      <select id="reportPeriod" class="text-input">
+        <option value="3">${t("report.period3")}</option>
+        <option value="6">${t("report.period6")}</option>
+        <option value="12">${t("report.period12")}</option>
+      </select>
+      <label class="muted">${t("report.format")}</label>
+      <select id="reportFormat" class="text-input">
+        <option value="both">${t("report.formatBoth")}</option>
+        <option value="word">${t("report.formatWord")}</option>
+        <option value="ppt">${t("report.formatPpt")}</option>
+      </select>
+      <button id="reportGenerateBtn" class="btn-primary" style="width:100%;">${t("report.generate")}</button>
+      <p class="muted" id="reportStatus" style="min-height:16px;margin-top:8px;"></p>
+    </div>
+
+    <h3 class="section-title">${t("plan.mainSection")}</h3>
+    <div class="list">${main.map(itemRow).join("")}</div>
+
+    <h3 class="section-title">${t("plan.internalSection")}</h3>
+    <div class="list">${internal.map(itemRow).join("")}</div>
+  `;
+
+  el("planExcelInput").onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const count = await importPlanFromWorkbook(file);
+    alert(t("plan.importedCount", { n: count }));
+    renderPlan();
+  };
+  el("planExportBtn").onclick = exportPlanExcel;
+  el("planResetBtn").onclick = async () => {
+    if (!confirm(t("plan.resetConfirm"))) return;
+    const all = await getAll("planItems");
+    for (const p of all) await del("planItems", p.id);
+    await ensurePlanItems();
+    renderPlan();
+  };
+  el("reportGenerateBtn").onclick = () => runReportGeneration();
+}
+window.doPlanDone = async (id) => { const note = prompt(t("plan.doneNotePrompt")) || ""; await markPlanItemDone(id, note); renderPlan(); };
+window.editPlanTiming = async (id) => {
+  const p = await get("planItems", id);
+  if (!p) return;
+  const timing = prompt(t("plan.editTimingPrompt"), p.timing);
+  if (timing === null) return;
+  const recStr = prompt(t("plan.editRecurrencePrompt"), String(p.recurrenceDays || 0));
+  const recurrenceDays = recStr === null ? p.recurrenceDays : Number(recStr) || 0;
+  p.timing = timing;
+  p.recurrenceDays = recurrenceDays;
+  if (recurrenceDays > 0 && !p.nextDate) p.nextDate = isoDate(addDays(new Date(), 14));
+  if (recurrenceDays === 0) p.nextDate = null;
+  await put("planItems", p);
+  renderPlan();
+};
+
+// ---------- Report data + generation (client-side Word/PPT, no server) ----------
+async function computeReportData(periodMonths) {
+  const end = new Date();
+  const start = addMonths(end, -periodMonths);
+  const startISO = isoDate(start), endISO = isoDate(end);
+
+  const [items, attendanceAll, members] = await Promise.all([getAll("planItems"), getAll("attendance"), getAll("members")]);
+  const attendance = attendanceAll.filter((a) => a.sessionDate >= startISO && a.sessionDate <= endISO);
+  const progs = PROGRAM_DEFS();
+
+  const sessionDates = [...new Set(attendance.map((a) => a.sessionDate))];
+  const perProgram = progs.map((p) => {
+    const rows = attendance.filter((a) => a.programKey === p.key);
+    return { name: p.name, total: rows.length, onTime: rows.filter((a) => a.status === "on-time").length, late: rows.filter((a) => a.status === "late").length };
+  });
+  const newMembers = members.filter((m) => m.joinDate && m.joinDate >= startISO && m.joinDate <= endISO);
+  const confessionsInPeriod = members.filter((m) => m.lastConfessionDate && m.lastConfessionDate >= startISO && m.lastConfessionDate <= endISO);
+  const absentees = await computeConsecutiveAbsences();
+
+  const periodDays = Math.round((end - start) / 86400000);
+  const planRows = items.sort((a, b) => (a.category === b.category ? a.no - b.no : a.category.localeCompare(b.category))).map((p) => {
+    const logsInPeriod = (p.doneLog || []).filter((l) => l.date >= startISO && l.date <= endISO);
+    const expected = p.recurrenceDays > 0 ? Math.max(1, Math.round(periodDays / p.recurrenceDays)) : null;
+    let status;
+    if (expected === null) status = logsInPeriod.length > 0 ? "done" : "manual";
+    else status = logsInPeriod.length >= expected ? "onTrack" : (logsInPeriod.length > 0 ? "partial" : "behind");
+    return { ...p, logsInPeriod, expected, status };
+  });
+
+  const gradeStats = await computeGradeStats(startISO, endISO);
+  const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
+
+  return {
+    periodMonths, startISO, endISO,
+    totals: {
+      totalMembers: members.length, newMembers: newMembers.length, sessionsHeld: sessionDates.length,
+      totalScans: attendance.length, onTime: attendance.filter((a) => a.status === "on-time").length,
+      late: attendance.filter((a) => a.status === "late").length, confessionsInPeriod: confessionsInPeriod.length,
+      absenteesNow: absentees.length,
+    },
+    perProgram, planRows, gradeStats, gradeNarrative,
+  };
+}
+const STATUS_LABEL = {
+  am: { onTrack: "በመልካም ሁኔታ ላይ", partial: "በሂደት ላይ", behind: "ትኩረት ይሻል", done: "ተከናውኗል", manual: "በእጅ ክትትል ይደረግበት" },
+  en: { onTrack: "On track", partial: "In progress", behind: "Needs attention", done: "Done", manual: "Manual tracking" },
+};
+
+async function runReportGeneration() {
+  const periodMonths = Number(el("reportPeriod").value);
+  const format = el("reportFormat").value;
+  const statusEl = el("reportStatus");
+  statusEl.textContent = t("report.generating");
+  try {
+    const data = await computeReportData(periodMonths);
+    if (format === "word" || format === "both") await generateWordReport(data);
+    if (format === "ppt" || format === "both") await generatePptReport(data);
+    statusEl.textContent = t("report.done");
+  } catch (e) {
+    statusEl.textContent = t("report.error") + ": " + e.message;
+  }
+}
+
+async function generateWordReport(data) {
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, AlignmentType, Packer } = window.docx;
+  const lang = getLang();
+  const periodLabel = t("report.period" + data.periodMonths) || `${data.periodMonths}mo`;
+
+  function cell(text, opts = {}) {
+    return new TableCell({
+      width: { size: opts.width || 2000, type: WidthType.DXA },
+      shading: opts.shade ? { type: ShadingType.CLEAR, fill: opts.shade } : undefined,
+      children: [new Paragraph({ children: [new TextRun({ text: String(text), bold: !!opts.bold, size: 16 })] })],
+    });
+  }
+  const header = new TableRow({
+    tableHeader: true,
+    children: ["#", "Sub-unit", "Plan item", "Target", "Done in period", "Status"].map((h) => cell(h, { bold: true, shade: "D9C7A3" })),
+  });
+  const rows = data.planRows.map((p) => new TableRow({
+    children: [
+      cell(p.no), cell(p.subUnit), cell(p.title, { width: 3500 }), cell(p.metricTarget),
+      cell(p.logsInPeriod.length + (p.expected ? ` / ${p.expected}` : "")),
+      cell(STATUS_LABEL[lang][p.status] || p.status),
+    ],
+  }));
+
+  const gradeHeader = new TableRow({
+    tableHeader: true,
+    children: [lang === "am" ? "ክፍል" : "Grade", lang === "am" ? "የተማሪ ብዛት" : "Students", lang === "am" ? "ቅኝት" : "Scans", lang === "am" ? "መጠን" : "Rate"].map((h) => cell(h, { bold: true, shade: "D9C7A3" })),
+  });
+  const gradeRowsAsc = [...data.gradeStats.rows].sort((a, b) => a.grade - b.grade);
+  const gradeTableRows = gradeRowsAsc.map((r) => new TableRow({
+    children: [cell((lang === "am" ? "ክፍል " : "Grade ") + r.grade), cell(r.memberCount), cell(r.scans), cell(Math.round(r.rate * 100) + "%")],
+  }));
+
+  const doc = new Document({
+    sections: [{
+      children: [
+        new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: t("app.title") })] }),
+        new Paragraph({ children: [new TextRun({ text: `${periodLabel}  ·  ${data.startISO} → ${data.endISO}`, italics: true })] }),
+        new Paragraph({ text: "" }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance" })] }),
+        new Paragraph({ text: `${lang === "am" ? "አጠቃላይ አባላት" : "Total members"}: ${data.totals.totalMembers}` }),
+        new Paragraph({ text: `${lang === "am" ? "አዲስ አባላት" : "New members"}: ${data.totals.newMembers}` }),
+        new Paragraph({ text: `${lang === "am" ? "የተካሄዱ መርሐ ግብራት" : "Sessions held"}: ${data.totals.sessionsHeld}` }),
+        new Paragraph({ text: `${lang === "am" ? "አጠቃላይ ቅኝቶች" : "Total attendance scans"}: ${data.totals.totalScans} (${lang === "am" ? "በሰዓቱ" : "on-time"} ${data.totals.onTime} / ${lang === "am" ? "ዘግይቷል" : "late"} ${data.totals.late})` }),
+        new Paragraph({ text: `${lang === "am" ? "የተከናወነ ንስሃ" : "Confessions recorded"}: ${data.totals.confessionsInPeriod}` }),
+        new Paragraph({ text: `${lang === "am" ? "አሁን ላይ ተከታታይ ቀሪ አባላት" : "Currently on absence streak"}: ${data.totals.absenteesNow}` }),
+        new Paragraph({ text: "" }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "በክፍል ደረጃ ትንተና (1-12)" : "Grade-level analysis (1-12)" })] }),
+        new Table({ width: { size: 7000, type: WidthType.DXA }, rows: [gradeHeader, ...gradeTableRows] }),
+        new Paragraph({ text: "" }),
+        ...(data.gradeNarrative.length ? data.gradeNarrative.map((line) => new Paragraph({ text: "• " + line })) : [new Paragraph({ text: lang === "am" ? "በቂ መረጃ የለም" : "Not enough data yet" })]),
+        new Paragraph({ text: "" }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "በዕቅድ መሠረት አፈጻጸም" : "Performance against the plan" })] }),
+        new Table({ width: { size: 10000, type: WidthType.DXA }, rows: [header, ...rows] }),
+      ],
+    }],
+  });
+  const blob = await Packer.toBlob(doc);
+  downloadBlob(blob, `HR-report-${data.periodMonths}mo-${todayISO()}.docx`);
+}
+
+async function generatePptReport(data) {
+  const lang = getLang();
+  const periodLabel = t("report.period" + data.periodMonths) || `${data.periodMonths}mo`;
+  const pptx = new PptxGenJS();
+  pptx.defineSlideMaster({ title: "MASTER", background: { color: "14110F" } });
+
+  const s1 = pptx.addSlide({ masterName: "MASTER" });
+  s1.addText(t("app.title"), { x: 0.5, y: 1.8, w: 9, h: 1, fontSize: 32, bold: true, color: "F2A33C" });
+  s1.addText(`${periodLabel}  ·  ${data.startISO} → ${data.endISO}`, { x: 0.5, y: 2.8, w: 9, h: 0.6, fontSize: 16, color: "F2EDE6" });
+
+  const s2 = pptx.addSlide({ masterName: "MASTER" });
+  s2.addText(lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance", { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 24, bold: true, color: "F2A33C" });
+  const bullets = [
+    `${lang === "am" ? "አጠቃላይ አባላት" : "Total members"}: ${data.totals.totalMembers}`,
+    `${lang === "am" ? "አዲስ አባላት" : "New members"}: ${data.totals.newMembers}`,
+    `${lang === "am" ? "የተካሄዱ መርሐ ግብራት" : "Sessions held"}: ${data.totals.sessionsHeld}`,
+    `${lang === "am" ? "አጠቃላይ ቅኝቶች" : "Total scans"}: ${data.totals.totalScans} (${data.totals.onTime} ${lang === "am" ? "በሰዓቱ" : "on-time"} / ${data.totals.late} ${lang === "am" ? "ዘግይቷል" : "late"})`,
+    `${lang === "am" ? "የተከናወነ ንስሃ" : "Confessions recorded"}: ${data.totals.confessionsInPeriod}`,
+    `${lang === "am" ? "አሁን ተከታታይ ቀሪ" : "Currently on absence streak"}: ${data.totals.absenteesNow}`,
+  ];
+  s2.addText(bullets.map((b) => ({ text: b, options: { bullet: true, breakLine: true, color: "F2EDE6", fontSize: 16 } })), { x: 0.5, y: 1.1, w: 9, h: 4 });
+
+  const s3 = pptx.addSlide({ masterName: "MASTER" });
+  s3.addText(lang === "am" ? "በፕሮግራም የመገኘት መጠን" : "Attendance by program", { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 24, bold: true, color: "F2A33C" });
+  const progRows = [[
+    { text: lang === "am" ? "ፕሮግራም" : "Program", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+    { text: lang === "am" ? "በሰዓቱ" : "On-time", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+    { text: lang === "am" ? "ዘግይቷል" : "Late", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+  ]].concat(data.perProgram.map((p) => [
+    { text: p.name, options: { color: "F2EDE6" } },
+    { text: String(p.onTime), options: { color: "4CAF7D" } },
+    { text: String(p.late), options: { color: "E0605A" } },
+  ]));
+  s3.addTable(progRows, { x: 0.5, y: 1.1, w: 9, fontSize: 14, border: { type: "solid", color: "332C26" } });
+
+  const s4 = pptx.addSlide({ masterName: "MASTER" });
+  s4.addText(lang === "am" ? "በክፍል ደረጃ ትንተና (1-12)" : "Grade-level analysis (1-12)", { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 24, bold: true, color: "F2A33C" });
+  const gradeRowsAsc = [...data.gradeStats.rows].sort((a, b) => a.grade - b.grade);
+  s4.addChart(pptx.ChartType.bar, [{
+    name: lang === "am" ? "የተሳትፎ መጠን %" : "Attendance rate %",
+    labels: gradeRowsAsc.map((r) => (lang === "am" ? "ክፍል " : "Gr.") + r.grade),
+    values: gradeRowsAsc.map((r) => Math.round(r.rate * 100)),
+  }], { x: 0.4, y: 1.0, w: 9.2, h: 3.0, chartColors: ["F2A33C"], catAxisLabelColor: "9C9187", valAxisLabelColor: "9C9187", showTitle: false });
+  if (data.gradeNarrative.length) {
+    s4.addText(data.gradeNarrative.slice(0, 5).map((l) => ({ text: l, options: { bullet: true, breakLine: true, color: "F2EDE6", fontSize: 12 } })), { x: 0.4, y: 4.2, w: 9.2, h: 1.6 });
+  }
+
+  // one slide per sub-unit with plan item status
+  const subUnits = [...new Set(data.planRows.map((p) => p.subUnit))];
+  for (const su of subUnits) {
+    const rowsForUnit = data.planRows.filter((p) => p.subUnit === su);
+    const slide = pptx.addSlide({ masterName: "MASTER" });
+    slide.addText(su, { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 22, bold: true, color: "F2A33C" });
+    const tbl = [[
+      { text: lang === "am" ? "ዕቅድ" : "Item", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+      { text: lang === "am" ? "ክንውን" : "Done", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+      { text: lang === "am" ? "ሁኔታ" : "Status", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+    ]].concat(rowsForUnit.map((p) => [
+      { text: p.title, options: { color: "F2EDE6", fontSize: 11 } },
+      { text: `${p.logsInPeriod.length}${p.expected ? "/" + p.expected : ""}`, options: { color: "F2EDE6", fontSize: 11 } },
+      { text: STATUS_LABEL[lang][p.status] || p.status, options: { color: p.status === "behind" ? "E0605A" : p.status === "onTrack" ? "4CAF7D" : "F2A33C", fontSize: 11 } },
+    ]));
+    slide.addTable(tbl, { x: 0.4, y: 1.0, w: 9.2, fontSize: 11, border: { type: "solid", color: "332C26" } });
+  }
+
+  pptx.writeFile({ fileName: `HR-report-${data.periodMonths}mo-${todayISO()}.pptx` });
 }
 
 // ---------- Tabs ----------
-const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, settings: renderSettings, reports: renderReports };
+const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, settings: renderSettings, reports: renderReports };
 function setTab(tabName) {
   if (scanState.streaming) toggleCamera();
   currentTab = tabName;
@@ -940,7 +1395,7 @@ async function init() {
   db = await openDB();
   await ensureDeviceId();
   await ensurePrograms();
-  await ensureHrEvents();
+  await ensurePlanItems();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
   boot();
 }

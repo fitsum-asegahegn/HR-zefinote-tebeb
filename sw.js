@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v2";
+const CACHE = "finote-attendance-v3";
 
 const APP_SHELL = [
   "./",
@@ -17,6 +17,8 @@ const RUNTIME_LIBS = [
   "https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
   "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/docx@8/build/index.js",
+  "https://cdn.jsdelivr.net/npm/pptxgenjs@3/dist/pptxgen.bundle.js",
 ];
 
 self.addEventListener("install", (e) => {
