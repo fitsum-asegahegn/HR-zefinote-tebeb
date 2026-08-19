@@ -2,16 +2,26 @@
 -- Then in Authentication → Providers, make sure "Email" is enabled
 -- (Confirm email can be turned off for a small internal team if you
 -- want sign-up to work without an email step).
+--
+-- If you already ran an earlier version of this file and are just
+-- picking up the grade + call-log additions, run this migration
+-- instead of the CREATE TABLE below:
+--   alter table members add column if not exists grade integer check (grade between 1 and 12);
+--   alter table members add column if not exists call_log jsonb;
+--   alter table members add column if not exists call_history jsonb;
 
 create table if not exists members (
   id uuid primary key,
   full_name text not null,
   phone text,
   category text,
+  grade integer check (grade between 1 and 12),
   qr_id text unique not null,
   last_confession_date date,
   join_date date,
   active boolean default true,
+  call_log jsonb, -- { called, reason, calledBy, calledAt } for the absence-call workflow
+  call_history jsonb, -- append-only log of every call made, kept even after resolved (for reports)
   updated_at timestamptz default now()
 );
 

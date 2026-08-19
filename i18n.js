@@ -28,6 +28,11 @@ const I18N = {
     "dash.noPhone": "ስልክ የለም",
     "dash.streakBadge": "{n} ተከታታይ ቀሪ",
     "dash.viewFullPlan": "ሙሉውን ዕቅድ ይመልከቱ →",
+    "dash.markCalled": "ደወልኩ ✓",
+    "dash.alreadyCalled": "ተደውሏል",
+    "dash.undoCall": "መልስ",
+    "dash.callReasonPrompt": "ለምን እንደቀሩ ምክንያት (አማራጭ) — ለምሳሌ 'ታሟል'፣ 'ወደ ሌላ ከተማ ሄዷል':",
+    "dash.calledBy": "በ{who} ተደውሏል — {date}",
 
     "plan.tabTitle": "ዕቅድ",
     "plan.importExcel": "Excel አስገባ",
@@ -213,6 +218,11 @@ const I18N = {
     "dash.noPhone": "No phone",
     "dash.streakBadge": "{n} in a row",
     "dash.viewFullPlan": "View full plan →",
+    "dash.markCalled": "I called ✓",
+    "dash.alreadyCalled": "Already called",
+    "dash.undoCall": "Undo",
+    "dash.callReasonPrompt": "Reason they've been absent (optional) — e.g. 'sick', 'moved to another city':",
+    "dash.calledBy": "Called by {who} — {date}",
 
     "plan.tabTitle": "Plan",
     "plan.importExcel": "Import Excel",

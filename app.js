@@ -250,8 +250,17 @@ async function recordAttendance(memberId, programKey, atDate = new Date()) {
   record.deviceId = settings.deviceId;
   record.synced = false;
   await put("attendance", record);
+  await clearCallLogIfPresent(memberId);
   if (!navigator.onLine) requestBackgroundSync();
   return { record, status };
+}
+async function clearCallLogIfPresent(memberId) {
+  const m = await get("members", memberId);
+  if (m && m.callLog) {
+    m.callLog = null;
+    m.synced = false;
+    await put("members", m);
+  }
 }
 function requestBackgroundSync() {
   if ("serviceWorker" in navigator && "SyncManager" in window) {
@@ -394,6 +403,53 @@ window.toggleLang = function () {
 };
 
 // ---------- Dashboard ----------
+function absenteeRow(a) {
+  const m = a.member;
+  const phoneLink = m.phone
+    ? `<a href="tel:${m.phone.replace(/\s+/g, "")}" class="phone-link" onclick="event.stopPropagation();">${m.phone}</a>`
+    : t("dash.noPhone");
+  const log = m.callLog;
+  return `
+    <div class="list-row" style="align-items:flex-start;">
+      <div style="flex:1;">
+        <b>${m.fullName}</b><br>
+        <span class="muted">${phoneLink}</span>
+        ${log && log.called
+          ? `<br><span class="muted">${t("dash.calledBy", { who: log.calledBy || "?", date: log.calledAt })}${log.reason ? " — " + log.reason : ""}</span>`
+          : ""}
+      </div>
+      <div class="row-actions" style="flex-direction:column;align-items:flex-end;gap:6px;">
+        <div class="badge badge-red">${t("dash.streakBadge", { n: a.streak })}</div>
+        ${log && log.called
+          ? `<span class="badge badge-green">${t("dash.alreadyCalled")}</span><button class="btn-small" onclick="uncallMember('${m.id}')">${t("dash.undoCall")}</button>`
+          : `<button class="btn-small" onclick="callMember('${m.id}')">${t("dash.markCalled")}</button>`}
+      </div>
+    </div>`;
+}
+window.callMember = async (memberId) => {
+  const reason = prompt(t("dash.callReasonPrompt")) || "";
+  const m = await get("members", memberId);
+  if (!m) return;
+  const session = await getSession();
+  const settings = await getSettings();
+  const calledBy = (session && session.user && session.user.email) || settings.deviceName || settings.deviceId || "";
+  const calledAt = todayISO();
+  m.callLog = { called: true, reason, calledBy, calledAt };
+  m.callHistory = m.callHistory || [];
+  m.callHistory.push({ date: calledAt, reason, calledBy });
+  m.synced = false;
+  await put("members", m);
+  renderDashboard();
+};
+window.uncallMember = async (memberId) => {
+  const m = await get("members", memberId);
+  if (!m) return;
+  m.callLog = null;
+  m.synced = false;
+  await put("members", m);
+  renderDashboard();
+};
+
 async function renderDashboard() {
   const [absentees, confessionDue, hrDue, settings] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(), getSettings()]);
   const members = await getAll("members");
@@ -411,11 +467,7 @@ async function renderDashboard() {
     </div>
 
     <h3 class="section-title">${t("dash.callListTitle", { n: thr })}</h3>
-    ${absentees.length ? `<div class="list">${absentees.map(a => `
-      <div class="list-row">
-        <div><b>${a.member.fullName}</b><br><span class="muted">${a.member.phone || t("dash.noPhone")}</span></div>
-        <div class="badge badge-red">${t("dash.streakBadge", { n: a.streak })}</div>
-      </div>`).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
+    ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
 
     <h3 class="section-title">${t("dash.confessionTitle")}</h3>
     ${confessionDue.length ? `<div class="list">${confessionDue.map(c => `
@@ -682,6 +734,9 @@ async function exportMembersExcel(members) {
   const rows = members.map((m) => ({
     Name: m.fullName, Phone: m.phone || "", Category: m.category || "", Grade: m.grade || "",
     LastConfession: m.lastConfessionDate || "", JoinDate: m.joinDate || "", QrId: m.qrId,
+    CurrentlyFlaggedForCall: m.callLog && m.callLog.called ? "yes" : "",
+    LastCallReason: m.callLog ? (m.callLog.reason || "") : "",
+    TotalTimesCalled: (m.callHistory || []).length,
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -1177,6 +1232,14 @@ async function computeReportData(periodMonths) {
   const gradeStats = await computeGradeStats(startISO, endISO);
   const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
 
+  const callReasons = [];
+  members.forEach((m) => {
+    (m.callHistory || []).forEach((h) => {
+      if (h.date >= startISO && h.date <= endISO) callReasons.push({ name: m.fullName, date: h.date, reason: h.reason || "", calledBy: h.calledBy || "" });
+    });
+  });
+  callReasons.sort((a, b) => b.date.localeCompare(a.date));
+
   return {
     periodMonths, startISO, endISO,
     totals: {
@@ -1185,7 +1248,7 @@ async function computeReportData(periodMonths) {
       late: attendance.filter((a) => a.status === "late").length, confessionsInPeriod: confessionsInPeriod.length,
       absenteesNow: absentees.length,
     },
-    perProgram, planRows, gradeStats, gradeNarrative,
+    perProgram, planRows, gradeStats, gradeNarrative, callReasons,
   };
 }
 const STATUS_LABEL = {
@@ -1241,6 +1304,14 @@ async function generateWordReport(data) {
     children: [cell((lang === "am" ? "ክፍል " : "Grade ") + r.grade), cell(r.memberCount), cell(r.scans), cell(Math.round(r.rate * 100) + "%")],
   }));
 
+  const callHeader = new TableRow({
+    tableHeader: true,
+    children: [lang === "am" ? "ስም" : "Name", lang === "am" ? "ቀን" : "Date", lang === "am" ? "ምክንያት" : "Reason", lang === "am" ? "የደወለው" : "Called by"].map((h) => cell(h, { bold: true, shade: "D9C7A3" })),
+  });
+  const callTableRows = data.callReasons.map((c) => new TableRow({
+    children: [cell(c.name), cell(c.date), cell(c.reason || "-", { width: 3500 }), cell(c.calledBy || "-")],
+  }));
+
   const doc = new Document({
     sections: [{
       children: [
@@ -1259,6 +1330,11 @@ async function generateWordReport(data) {
         new Table({ width: { size: 7000, type: WidthType.DXA }, rows: [gradeHeader, ...gradeTableRows] }),
         new Paragraph({ text: "" }),
         ...(data.gradeNarrative.length ? data.gradeNarrative.map((line) => new Paragraph({ text: "• " + line })) : [new Paragraph({ text: lang === "am" ? "በቂ መረጃ የለም" : "Not enough data yet" })]),
+        new Paragraph({ text: "" }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "የቀሪ አባላት ጥሪ ምክንያቶች" : "Absentee call reasons" })] }),
+        data.callReasons.length
+          ? new Table({ width: { size: 9000, type: WidthType.DXA }, rows: [callHeader, ...callTableRows] })
+          : new Paragraph({ text: lang === "am" ? "በዚህ ጊዜ ውስጥ የተመዘገበ ጥሪ የለም" : "No calls logged in this period" }),
         new Paragraph({ text: "" }),
         new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "በዕቅድ መሠረት አፈጻጸም" : "Performance against the plan" })] }),
         new Table({ width: { size: 10000, type: WidthType.DXA }, rows: [header, ...rows] }),
@@ -1314,6 +1390,26 @@ async function generatePptReport(data) {
   }], { x: 0.4, y: 1.0, w: 9.2, h: 3.0, chartColors: ["F2A33C"], catAxisLabelColor: "9C9187", valAxisLabelColor: "9C9187", showTitle: false });
   if (data.gradeNarrative.length) {
     s4.addText(data.gradeNarrative.slice(0, 5).map((l) => ({ text: l, options: { bullet: true, breakLine: true, color: "F2EDE6", fontSize: 12 } })), { x: 0.4, y: 4.2, w: 9.2, h: 1.6 });
+  }
+
+  // call-reasons slide(s) — chunk into pages of 12 rows so text stays legible
+  if (data.callReasons.length) {
+    const chunkSize = 12;
+    for (let i = 0; i < data.callReasons.length; i += chunkSize) {
+      const chunk = data.callReasons.slice(i, i + chunkSize);
+      const sc = pptx.addSlide({ masterName: "MASTER" });
+      sc.addText(lang === "am" ? "የቀሪ አባላት ጥሪ ምክንያቶች" : "Absentee call reasons", { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 22, bold: true, color: "F2A33C" });
+      const callTbl = [[
+        { text: lang === "am" ? "ስም" : "Name", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+        { text: lang === "am" ? "ቀን" : "Date", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+        { text: lang === "am" ? "ምክንያት" : "Reason", options: { bold: true, fill: "3A2C15", color: "F2A33C" } },
+      ]].concat(chunk.map((c) => [
+        { text: c.name, options: { color: "F2EDE6", fontSize: 11 } },
+        { text: c.date, options: { color: "F2EDE6", fontSize: 11 } },
+        { text: c.reason || "-", options: { color: "F2EDE6", fontSize: 11 } },
+      ]));
+      sc.addTable(callTbl, { x: 0.4, y: 1.0, w: 9.2, fontSize: 11, border: { type: "solid", color: "332C26" } });
+    }
   }
 
   // one slide per sub-unit with plan item status

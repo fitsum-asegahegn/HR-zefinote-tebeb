@@ -130,6 +130,24 @@ it holds even if someone calls the API directly. In offline-only mode
 (no Supabase connected) this restriction doesn't apply since there's no
 shared database to protect.
 
+## Calling absentees: tap-to-dial + no duplicate calls + reasons
+On the Dashboard, each absentee's phone number is now a `tel:` link —
+tapping it opens the phone's dialer directly. Once someone calls, they
+tap **"ደወልኩ ✓"** and add a short reason (sick, moved away, etc.); the
+row then shows "ተደውሏል" (already called) with who called and when, so
+another HR member glancing at the same list doesn't call again. There's
+an "Undo" if it was marked by mistake.
+
+That status automatically clears the next time the member shows up and
+gets scanned — so if they go absent again later, it's treated as a
+fresh case and can be called again. The reason itself isn't lost when
+it clears, though: every call is also appended to a permanent
+`callHistory` log on the member (separate from the live "currently
+flagged" status), which is what feeds the **"Absentee call reasons"**
+table in the generated Word/PPT reports and the members Excel export —
+so patterns in why people are missing sessions are visible over time,
+not just in the moment.
+
 ## The plan is now built into the system (ዕቅድ tab)
 The exact 18-item plan from `የሰው_ሀብት_ክፍል_ዕቅድ.docx` (13 main Article-20 items
 + 5 internal team-cohesion items) is seeded automatically on first load —

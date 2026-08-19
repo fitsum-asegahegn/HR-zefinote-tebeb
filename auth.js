@@ -165,15 +165,16 @@ async function fetchUserRole(session) {
 // ---------- Cloud sync (Supabase tables: members, attendance, hr_events) ----------
 function mapMemberToRemote(m) {
   return {
-    id: m.id, full_name: m.fullName, phone: m.phone || null, category: m.category || null,
+    id: m.id, full_name: m.fullName, phone: m.phone || null, category: m.category || null, grade: m.grade || null,
     qr_id: m.qrId, last_confession_date: m.lastConfessionDate, join_date: m.joinDate, active: m.active !== false,
+    call_log: m.callLog || null, call_history: m.callHistory || [],
   };
 }
 function mapRemoteToMember(r) {
   return {
-    id: r.id, fullName: r.full_name, phone: r.phone || "", category: r.category || "",
+    id: r.id, fullName: r.full_name, phone: r.phone || "", category: r.category || "", grade: r.grade || null,
     qrId: r.qr_id, lastConfessionDate: r.last_confession_date, joinDate: r.join_date,
-    active: r.active !== false, synced: true,
+    active: r.active !== false, callLog: r.call_log || null, callHistory: r.call_history || [], synced: true,
   };
 }
 function mapAttendanceToRemote(a, userId) {
