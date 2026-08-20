@@ -162,6 +162,30 @@ async function fetchUserRole(session) {
   }
 }
 
+// ---------- Display name (separate table from roles — see supabase-schema.sql) ----------
+window.currentDisplayName = "";
+async function fetchDisplayName(session) {
+  if (!sbClient || !session) { window.currentDisplayName = ""; return; }
+  try {
+    const { data } = await sbClient.from("profiles").select("display_name").eq("user_id", session.user.id).maybeSingle();
+    window.currentDisplayName = (data && data.display_name) || "";
+  } catch (e) {
+    window.currentDisplayName = "";
+  }
+}
+async function saveDisplayName(name) {
+  const session = await getSession();
+  if (!sbClient || !session) return false;
+  try {
+    const { error } = await sbClient.from("profiles").upsert({ user_id: session.user.id, display_name: name.trim() });
+    if (!error) { window.currentDisplayName = name.trim(); return true; }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+window.saveDisplayName = saveDisplayName;
+
 // ---------- Cloud sync (Supabase tables: members, attendance, hr_events) ----------
 function mapMemberToRemote(m) {
   return {

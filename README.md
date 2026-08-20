@@ -148,6 +148,23 @@ table in the generated Word/PPT reports and the members Excel export —
 so patterns in why people are missing sessions are visible over time,
 not just in the moment.
 
+## Display name instead of email in "called by" / reports
+Settings → ☁️ Supabase connection (when signed in) now has a **Display
+name** field — set it once and it replaces your email everywhere the
+app shows who did something (currently: the absentee call log / "called
+by" on the Dashboard and in the generated reports). New sign-ups get a
+reasonable default (the part of their email before the @) from a DB
+trigger, so it's never blank, but everyone should personalize it.
+
+This lives in its own `profiles` table, deliberately separate from
+`user_roles` — the RLS policy lets you edit only your own display name,
+and because it's a different table from the one holding `role`, there's
+no way that self-edit permission could be used to touch your own role
+and grant yourself admin. If you're adding this to a project that
+already ran an earlier version of `supabase-schema.sql`, you only need
+to run the `profiles` table block (it's called out in a comment near
+the top of the file) — no need to re-run the whole script.
+
 ## The plan is now built into the system (ዕቅድ tab)
 The exact 18-item plan from `የሰው_ሀብት_ክፍል_ዕቅድ.docx` (13 main Article-20 items
 + 5 internal team-cohesion items) is seeded automatically on first load —

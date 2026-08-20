@@ -430,9 +430,7 @@ window.callMember = async (memberId) => {
   const reason = prompt(t("dash.callReasonPrompt")) || "";
   const m = await get("members", memberId);
   if (!m) return;
-  const session = await getSession();
-  const settings = await getSettings();
-  const calledBy = (session && session.user && session.user.email) || settings.deviceName || settings.deviceId || "";
+  const calledBy = await resolveCallerName();
   const calledAt = todayISO();
   m.callLog = { called: true, reason, calledBy, calledAt };
   m.callHistory = m.callHistory || [];
@@ -441,6 +439,14 @@ window.callMember = async (memberId) => {
   await put("members", m);
   renderDashboard();
 };
+async function resolveCallerName() {
+  if (window.currentDisplayName) return window.currentDisplayName;
+  const settings = await getSettings();
+  if (settings.deviceName) return settings.deviceName;
+  const session = await getSession();
+  if (session && session.user && session.user.email) return session.user.email;
+  return settings.deviceId || "";
+}
 window.uncallMember = async (memberId) => {
   const m = await get("members", memberId);
   if (!m) return;
@@ -817,6 +823,11 @@ async function renderSettings() {
     ${sbClient ? `
       <p class="muted">${session ? t("settings.signedInAs") + " " + session.user.email : t("settings.notConnected")}</p>
       ${session ? `<p class="muted">${t("role.title")}: <b style="color:var(--amber)">${window.currentUserRole === "admin" ? t("role.admin") : t("role.member")}</b></p>` : ""}
+      ${session ? `
+        <label class="muted">${t("settings.displayName")}</label>
+        <input id="s_displayName" class="text-input" value="${window.currentDisplayName || ""}" placeholder="${t("settings.displayNamePlaceholder")}"/>
+        <button id="saveDisplayNameBtn" class="btn-secondary" style="margin-bottom:10px;">${t("settings.saveDisplayName")}</button>
+      ` : ""}
       <div class="toolbar">
         ${session ? `<button id="signOutBtn" class="btn-secondary">${t("settings.signOut")}</button>` : `<button id="goAuthBtn" class="btn-secondary">${t("settings.goSignIn")}</button>`}
         <button id="disconnectBtn" class="btn-secondary">${t("settings.disconnectCloud")}</button>
@@ -867,6 +878,13 @@ async function renderSettings() {
   if (el("disconnectBtn")) el("disconnectBtn").onclick = () => { clearSupabaseConfig(); setSkipCloud(true); boot(); };
   if (el("signOutBtn")) el("signOutBtn").onclick = signOut;
   if (el("goAuthBtn")) el("goAuthBtn").onclick = () => { setSkipCloud(false); appState = "auth"; renderAuthScreen(); };
+  if (el("saveDisplayNameBtn")) el("saveDisplayNameBtn").onclick = async () => {
+    const name = el("s_displayName").value.trim();
+    if (!name) return;
+    const ok = await saveDisplayName(name);
+    alert(ok ? t("settings.saved") : t("report.error"));
+    renderSettings();
+  };
   el("notifBtn").onclick = enableNotifications;
   el("bioBtn").onclick = toggleBiometric;
   el("syncBtn").onclick = syncNow;
@@ -1457,6 +1475,7 @@ async function boot() {
   if (session) {
     await mirrorAuthForSW(session);
     await fetchUserRole(session);
+    await fetchDisplayName(session);
     if (bioIsEnabled()) { appState = "biolock"; renderBioLock(); return; }
     await enterApp();
     return;
