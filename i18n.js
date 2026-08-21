@@ -1,7 +1,7 @@
 /* ---------- i18n ---------- */
 const I18N = {
   am: {
-    "app.title": "ፍኖተ ጥበብ — ዲጂታል  አቴንዳንስ",
+    "app.title": "ፍኖተ ጥበብ —   ዲጂታል  አቴንዳንስ",
     "app.subtitle": "QR-based offline attendance · HR ንዑስ ክፍል",
     "nav.dashboard": "ዳሽቦርድ",
     "nav.scan": "ስካን",
