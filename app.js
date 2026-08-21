@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
 let db;
 let currentTab = "dashboard";
 let appState = "boot"; // boot | setup | auth | offline-no-session | app
-let scanState = { streaming: false, stream: null, program: "timhert", recentHits: new Map(), batch: [] };
+let scanState = { streaming: false, stream: null, program: "timhert", recentHits: new Map(), batch: [], torchOn: false };
 
 // ---------- IndexedDB ----------
 function openDB() {
@@ -510,8 +510,13 @@ async function renderScan() {
       <label>${t("scan.programLabel")}</label>
       <select id="programSelect">${progs.map(p => `<option value="${p.key}" ${p.key === scanState.program ? "selected" : ""}>${p.name}</option>`).join("")}</select>
       <button id="camToggle" class="btn-primary">${t("scan.startCamera")}</button>
+      <button id="torchToggle" class="btn-secondary" style="display:none;">💡 ${t("scan.torch")}</button>
     </div>
-    <video id="video" playsinline style="width:100%;max-width:420px;border-radius:12px;display:none;"></video>
+    <div class="video-wrap" id="videoWrap" style="display:none;">
+      <video id="video" playsinline></video>
+      <div class="scan-reticle"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span></div>
+    </div>
+    <p class="muted" id="scanStatus" style="display:none;">● ${t("scan.readyStatus")}</p>
     <canvas id="canvas" style="display:none;"></canvas>
 
     <h3 class="section-title">${t("batch.title")}</h3>
@@ -523,12 +528,19 @@ async function renderScan() {
 
     <div id="scanFeed" class="list"></div>
 
+    <h3 class="section-title">${t("scan.codeEntryTitle")}</h3>
+    <div class="scan-controls">
+      <input id="codeEntry" placeholder="${t("scan.codeEntryPlaceholder")}" class="text-input" style="margin-bottom:0;flex:1;" autocomplete="off"/>
+      <button id="codeEntryBtn" class="btn-primary">${t("scan.find")}</button>
+    </div>
+
     <h3 class="section-title">${t("scan.manualTitle")}</h3>
     <input id="manualSearch" placeholder="${t("scan.searchPlaceholder")}" class="text-input"/>
     <div id="manualResults" class="list"></div>
   `;
   el("programSelect").onchange = (e) => (scanState.program = e.target.value);
   el("camToggle").onclick = toggleCamera;
+  el("torchToggle").onclick = toggleTorch;
   el("confirmBatchBtn").onclick = confirmBatch;
   el("clearBatchBtn").onclick = () => { scanState.batch = []; renderBatchList(); };
   el("manualSearch").oninput = (e) => {
@@ -537,6 +549,20 @@ async function renderScan() {
     el("manualResults").innerHTML = filtered.slice(0, 15).map((m) => `
       <div class="list-row"><div>${m.fullName}</div><button class="btn-small" onclick="queueScan('${m.id}')">${t("scan.record")}</button></div>`).join("");
   };
+  async function submitCodeEntry() {
+    const input = el("codeEntry");
+    const raw = input.value.trim();
+    if (!raw) return;
+    const ok = await queueScanByQrText(raw);
+    if (!ok) alert(t("scan.codeNotFound"));
+    input.value = "";
+    input.focus();
+  }
+  el("codeEntryBtn").onclick = submitCodeEntry;
+  // Works with an external Bluetooth/USB barcode scanner too: those act like
+  // a keyboard typing the code followed by Enter, so this field just needs
+  // to stay focused and listen for the Enter keystroke.
+  el("codeEntry").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); submitCodeEntry(); } };
   renderBatchList();
 }
 
@@ -565,6 +591,18 @@ async function queueScan(memberId) {
 }
 window.queueScan = queueScan;
 
+// Accepts either a full QR payload ("FTW1|xxxx") or just the raw id part —
+// used by the manual code-entry field, which also doubles as the input
+// target for an external Bluetooth/USB barcode scanner.
+async function queueScanByQrText(raw) {
+  const qrId = raw.startsWith("FTW1|") ? raw : "FTW1|" + raw;
+  const members = await getAll("members");
+  const member = members.find((m) => m.qrId === qrId || m.qrId === raw);
+  if (!member) return false;
+  await queueScan(member.id);
+  return true;
+}
+
 async function confirmBatch() {
   if (!scanState.batch.length) return;
   const items = [...scanState.batch];
@@ -592,11 +630,15 @@ function pushScanFeed(member, status) {
   if (navigator.vibrate) navigator.vibrate(60);
 }
 async function toggleCamera() {
-  const video = el("video"), btn = el("camToggle");
+  const video = el("video"), btn = el("camToggle"), wrap = el("videoWrap"), status = el("scanStatus"), torchBtn = el("torchToggle");
   if (scanState.streaming) {
     scanState.stream.getTracks().forEach((tr) => tr.stop());
     scanState.streaming = false;
-    video.style.display = "none";
+    scanState.torchOn = false;
+    wrap.style.display = "none";
+    status.style.display = "none";
+    torchBtn.style.display = "none";
+    torchBtn.classList.remove("active-lang");
     btn.textContent = t("scan.startCamera");
     return;
   }
@@ -604,13 +646,32 @@ async function toggleCamera() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     scanState.stream = stream;
     video.srcObject = stream;
-    video.style.display = "block";
+    wrap.style.display = "block";
+    status.style.display = "block";
     await video.play();
     scanState.streaming = true;
     btn.textContent = t("scan.stopCamera");
     scanLoop();
+
+    const track = stream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.torch) {
+      torchBtn.style.display = "inline-flex";
+    }
   } catch (err) {
     alert(t("scan.cameraError") + ": " + err.message);
+  }
+}
+async function toggleTorch() {
+  if (!scanState.stream) return;
+  const track = scanState.stream.getVideoTracks()[0];
+  if (!track) return;
+  scanState.torchOn = !scanState.torchOn;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: scanState.torchOn }] });
+    el("torchToggle").classList.toggle("active-lang", scanState.torchOn);
+  } catch (e) {
+    scanState.torchOn = false;
   }
 }
 function scanLoop() {

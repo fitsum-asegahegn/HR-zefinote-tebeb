@@ -66,10 +66,19 @@ Bilingual: every screen has an EN/አማ toggle in the top-right corner
 
 ## Daily use (offline)
 - **ስካን/Scan** tab → pick the program → start camera → point at each
-  student's QR. Status ("በሰዓቱ/On time" or "ዘግይቷል/Late") is computed
-  instantly and locally from the program's start time + grace window —
-  no internet required. Manual name-search is the fallback if a phone
-  has no camera or a QR is missing/damaged.
+  student's QR. A focus bracket in the middle of the frame shows where
+  to line the code up, and a torch/flashlight toggle appears
+  automatically on phones whose camera supports it (mainly Android;
+  iOS Safari doesn't expose a torch API to the browser). Status
+  ("በሰዓቱ/On time" or "ዘግይቷል/Late") is computed instantly and locally
+  from the program's start time + grace window — no internet required.
+- **Damaged QR, or an external barcode scanner:** the code-entry field
+  below the camera accepts the code typed or pasted directly. It also
+  works as the input target for a Bluetooth/USB barcode scanner — those
+  act like a keyboard typing the code and hitting Enter, so just tap
+  into that field first and scan.
+- Manual name-search is the fallback if a phone has no camera and the
+  code isn't known.
 - Everything queues locally (`synced:false`) until the phone is online
   and (if configured) signed in to Supabase.
 

@@ -69,6 +69,16 @@
   .scan-controls{ display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
   .scan-controls select{ background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:9px 10px; font-family:inherit; }
 
+  .video-wrap{ position:relative; width:100%; max-width:420px; border-radius:12px; overflow:hidden; margin-bottom:8px; background:#000; }
+  .video-wrap video{ width:100%; display:block; }
+  .scan-reticle{ position:absolute; inset:14% 20%; pointer-events:none; }
+  .scan-reticle .corner{ position:absolute; width:26px; height:26px; border:3px solid var(--amber); opacity:.9; }
+  .scan-reticle .tl{ top:0; left:0; border-right:none; border-bottom:none; border-radius:6px 0 0 0; }
+  .scan-reticle .tr{ top:0; right:0; border-left:none; border-bottom:none; border-radius:0 6px 0 0; }
+  .scan-reticle .bl{ bottom:0; left:0; border-right:none; border-top:none; border-radius:0 0 0 6px; }
+  .scan-reticle .br{ bottom:0; right:0; border-left:none; border-top:none; border-radius:0 0 6px 0; }
+  #scanStatus{ display:flex; align-items:center; gap:6px; color:var(--green); font-family:var(--mono, monospace); font-size:0.78rem; }
+
   nav.tabs{ position:fixed; bottom:0; left:0; right:0; background:var(--bg2); border-top:1px solid var(--border); z-index:20; }
   .tab-btn{ flex:1; background:transparent; color:var(--muted); padding:10px 0 8px; display:flex; flex-direction:column; align-items:center; gap:2px; font-size:0.66rem; }
   .tab-btn .ic{ font-size:1.15rem; }
