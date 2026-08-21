@@ -2,9 +2,14 @@
 let sbClient = null;
 
 function getSupabaseConfig() {
+  // localStorage (set via the in-app Settings form) always wins if present,
+  // so an admin can still override or reconnect to a different project.
+  // Otherwise fall back to config.js, which lets a whole team skip the
+  // copy-paste step entirely once it's filled in at deploy time.
+  const deployCfg = window.FINOTE_CONFIG || {};
   return {
-    url: localStorage.getItem("ftw_sb_url") || "",
-    key: localStorage.getItem("ftw_sb_key") || "",
+    url: localStorage.getItem("ftw_sb_url") || deployCfg.SUPABASE_URL || "",
+    key: localStorage.getItem("ftw_sb_key") || deployCfg.SUPABASE_ANON_KEY || "",
   };
 }
 function saveSupabaseConfig(url, key) {

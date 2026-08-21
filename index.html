@@ -88,7 +88,7 @@
 
   .print-only{ display:none; }
   @media print{
-    header, nav.tabs, .toolbar, #memberSearch, #memberList{ display:none !important; }
+    header, nav.tabs, .toolbar, #memberSearch, #gradeFilter, #memberList{ display:none !important; }
     body{ background:#fff; color:#000; padding:0; }
     .print-only{ display:block !important; }
     @page{ size:A4; margin:8mm; }
@@ -135,6 +135,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+  <script src="./config.js"></script>
   <script src="./i18n.js"></script>
   <script src="./auth.js"></script>
   <script src="./app.js"></script>

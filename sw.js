@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v5";
+const CACHE = "finote-attendance-v6";
 
 const APP_SHELL = [
   "./",
@@ -6,6 +6,7 @@ const APP_SHELL = [
   "./app.js",
   "./i18n.js",
   "./auth.js",
+  "./config.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

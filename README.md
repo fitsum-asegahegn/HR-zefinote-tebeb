@@ -19,23 +19,38 @@ Bilingual: every screen has an EN/አማ toggle in the top-right corner
 ## Optional: connect Supabase
 1. Create a free project at supabase.com.
 2. Open **SQL Editor**, paste and run `supabase-schema.sql` from this
-   folder — creates `members`, `attendance`, `hr_events` tables + RLS
-   policies (any signed-in user can read/write, good enough for a small
-   internal team).
+   folder — creates `members`, `attendance`, `hr_events`, `user_roles`,
+   and `profiles` tables + RLS policies (any signed-in user can
+   read/write; delete and report-generation are admin-only).
 3. In **Authentication → Providers**, confirm Email is enabled. For a
    small trusted team you can turn off "Confirm email" so sign-up works
    immediately without an email step.
 4. In **Project Settings → API**, copy the **Project URL** and **anon
    public key**.
-5. On first app load (or Settings → ☁️ Supabase connection if you skipped
-   it before), paste those two values in and continue. You'll land on a
-   sign-in/sign-up screen — each HR member creates their own account.
-   Everyone starts as `member`; open the `user_roles` table in Supabase
-   and change someone's row to `admin` if they should be able to delete
-   records.
-6. If you'd rather not use the cloud at all, tap **"Skip — offline only"**
-   on that first screen. You can always come back to Settings later and
-   connect it.
+5. **Recommended for a team:** paste those two values into `config.js`
+   (`SUPABASE_URL` and `SUPABASE_ANON_KEY`) before deploying, instead of
+   relying on each person to paste them in. Then every HR member who
+   opens the app lands straight on the sign-in/sign-up screen — nobody
+   has to copy anything. It's safe to ship the anon key in a static
+   site like this; it has no power by itself and every table it touches
+   is protected by the RLS policies from step 2. Never put the
+   `service_role` key here.
+   - Alternative: leave `config.js` blank and instead paste the URL/key
+     once on the first-load setup screen (or later via Settings → ☁️
+     Supabase connection). This still works, it's just a manual step
+     per device instead of a one-time deploy step.
+   - **Redeploy note:** if you copy this project's files into a repo
+     you're already running, your filled-in `config.js` will get
+     overwritten if you blindly replace every file with a fresh copy
+     from an updated build. Re-paste your URL/key into the new
+     `config.js` after updating, or keep your own copy of that one file
+     and only update the rest.
+6. Everyone who signs up starts as `member`; open the `user_roles`
+   table in Supabase and change someone's row to `admin` if they should
+   be able to delete records or generate the Word/PPT reports.
+7. Don't want the cloud at all? Leave `config.js` blank and tap
+   **"Skip — offline only"** on the first-load screen. You can always
+   come back to Settings later and connect it.
 
 ## First-time data setup
 1. **አባላት/Members** → **Excel አስገባ/Import Excel** → upload your member
@@ -239,6 +254,8 @@ automatically via the regular online-event listener.
 ## Files
 - `index.html` — app shell, dark/amber styling (Fraunces + JetBrains Mono),
   print CSS for the 8-per-page ID card layout
+- `config.js` — deploy-time Supabase URL/anon key so the whole team
+  skips the manual copy-paste step (see "Optional: connect Supabase")
 - `i18n.js` — full AM/EN dictionary + `t()` helper + language toggle with
   automatic browser-locale detection on first run
 - `auth.js` — Supabase client init, sign-in/sign-up screens, role lookup,
