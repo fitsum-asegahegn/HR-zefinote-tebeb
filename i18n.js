@@ -1,7 +1,7 @@
 /* ---------- i18n ---------- */
 const I18N = {
   am: {
-    "app.title": "ፍኖተ ጥበብ — ዲጂታል መገኘት",
+    "app.title": "ፍኖተ ጥበብ — ዲጂታል አቴንዳንሰ",
     "app.subtitle": "QR-based offline attendance · HR ንዑስ ክፍል",
     "nav.dashboard": "ዳሽቦርድ",
     "nav.scan": "ስካን",
@@ -194,7 +194,7 @@ const I18N = {
     "members.allGrades": "ሁሉም ክፍሎች",
   },
   en: {
-    "app.title": "Finote Tsibeb — Digital Attendance",
+    "app.title": "Finote Tibeb — Digital Attendance",
     "app.subtitle": "QR-based offline attendance · HR sub-unit",
     "nav.dashboard": "Dashboard",
     "nav.scan": "Scan",
