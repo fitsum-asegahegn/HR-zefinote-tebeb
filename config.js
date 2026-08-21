@@ -11,6 +11,6 @@
 // and every table it can touch is protected by the Row Level Security
 // policies in supabase-schema.sql. Never put a "service_role" key here.
 window.FINOTE_CONFIG = {
-  SUPABASE_URL: "https://mjcvkisgceldsqafvjtc.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qY3ZraXNnY2VsZHNxYWZ2anRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4OTUyNjksImV4cCI6MjEwMjQ3MTI2OX0.8KFg5k60atSBEX1oGyK0PEBk8yTHa_diG-f-ILYqnoc",
+  SUPABASE_URL: "",
+  SUPABASE_ANON_KEY: "",
 };

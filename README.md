@@ -113,6 +113,15 @@ modal also has **⬇ Download** and **↗ Share** buttons so you can send the
 soft copy straight to their phone (e.g. over Telegram) if they forget
 the printed card.
 
+**Printing only new members:** each row on the Members tab now has a
+checkbox. Tick just the members you need (search/grade-filter first to
+find them faster), then **🖨 Print selected** — only those go on paper,
+laid out on the same 8-per-page grid, so adding 1 or 8 new students
+doesn't mean reprinting or wasting paper on everyone else. **Select all
+shown** ticks everything currently visible under the active search/grade
+filter; **Clear selection** resets it. **Print all QR codes** still
+exists for a full reprint (e.g. after a fresh Excel import).
+
 ## Charts
 Reports tab now shows an attendance-trend line (last 12 sessions) and a
 per-program on-time/late bar chart, computed entirely from local data —

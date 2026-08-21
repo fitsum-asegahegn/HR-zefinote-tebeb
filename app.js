@@ -638,12 +638,18 @@ async function handleQrHit(qrId) {
 // ---------- Members ----------
 async function renderMembers() {
   const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const selected = new Set();
   el("view").innerHTML = `
     <div class="toolbar">
       <label class="btn-primary file-btn">${t("members.importExcel")}<input type="file" id="excelInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
       <button class="btn-secondary" id="addMemberBtn">${t("members.addMember")}</button>
-      <button class="btn-secondary" id="printQrBtn">${t("members.printAllQr")}</button>
       <button class="btn-secondary" id="exportMembersBtn">${t("members.exportExcel")}</button>
+    </div>
+    <div class="toolbar">
+      <button class="btn-secondary" id="printQrBtn">${t("members.printAllQr")}</button>
+      <button class="btn-primary" id="printSelectedBtn">${t("members.printSelected")} (<span id="selCount">0</span>)</button>
+      <button class="btn-secondary" id="selectAllBtn">${t("members.selectAllShown")}</button>
+      <button class="btn-secondary" id="clearSelBtn">${t("members.clearSelection")}</button>
     </div>
     <input id="memberSearch" class="text-input" placeholder="${t("members.searchPlaceholder")}"/>
     <select id="gradeFilter" class="text-input">
@@ -653,16 +659,28 @@ async function renderMembers() {
     <div id="memberList" class="list"></div>
     <div id="printArea" class="print-only"></div>
   `;
+  let lastShown = members;
+  function updateSelCount() { el("selCount").textContent = selected.size; }
   function draw(list) {
+    lastShown = list;
     const isAdmin = window.currentUserRole === "admin" || !sbClient; // no cloud = no RBAC, allow local admin actions
     el("memberList").innerHTML = list.map((m) => `
       <div class="list-row">
-        <div><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""} ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}</span></div>
+        <label class="sel-check">
+          <input type="checkbox" data-id="${m.id}" ${selected.has(m.id) ? "checked" : ""}/>
+        </label>
+        <div style="flex:1;"><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""} ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}</span></div>
         <div class="row-actions">
           <button class="btn-small" onclick="showQr('${m.id}')">${t("members.qr")}</button>
           ${isAdmin ? `<button class="btn-small" onclick="deleteMember('${m.id}')">${t("members.delete")}</button>` : ""}
         </div>
       </div>`).join("");
+    el("memberList").querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.onchange = () => {
+        if (cb.checked) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
+        updateSelCount();
+      };
+    });
   }
   function applyFilters() {
     const q = el("memberSearch").value.toLowerCase();
@@ -681,6 +699,21 @@ async function renderMembers() {
     await addMemberManual(name, phone, category, grade); renderMembers();
   };
   el("printQrBtn").onclick = () => printAllQr(members);
+  el("printSelectedBtn").onclick = () => {
+    if (!selected.size) { alert(t("members.noneSelected")); return; }
+    const chosen = members.filter((m) => selected.has(m.id));
+    printAllQr(chosen);
+  };
+  el("selectAllBtn").onclick = () => {
+    lastShown.forEach((m) => selected.add(m.id));
+    draw(lastShown);
+    updateSelCount();
+  };
+  el("clearSelBtn").onclick = () => {
+    selected.clear();
+    draw(lastShown);
+    updateSelCount();
+  };
   el("exportMembersBtn").onclick = () => exportMembersExcel(members);
 }
 window.deleteMember = async (id) => {

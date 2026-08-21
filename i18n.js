@@ -1,7 +1,7 @@
 /* ---------- i18n ---------- */
 const I18N = {
   am: {
-    "app.title": "ፍኖተ ጥበብ — ዲጂታል       አቴንዳንስ",
+    "app.title": "ፍኖተ ጥበብ — ዲጂታል መገኘት",
     "app.subtitle": "QR-based offline attendance · HR ንዑስ ክፍል",
     "nav.dashboard": "ዳሽቦርድ",
     "nav.scan": "ስካን",
@@ -192,9 +192,13 @@ const I18N = {
     "members.promptGrade": "ክፍል ደረጃ (1-12, ተማሪ ካልሆነ ባዶ ተወው):",
     "members.gradeShort": "ክፍል {n}",
     "members.allGrades": "ሁሉም ክፍሎች",
+    "members.printSelected": "የተመረጡትን አትም",
+    "members.selectAllShown": "የታዩትን ሁሉ ምረጥ",
+    "members.clearSelection": "ምርጫ አጽዳ",
+    "members.noneSelected": "ምንም አልተመረጠም — ለማተም ቢያንስ አንድ አባል ይምረጡ",
   },
   en: {
-    "app.title": "Finote Tibeb — Digital Attendance",
+    "app.title": "Finote Tsibeb — Digital Attendance",
     "app.subtitle": "QR-based offline attendance · HR sub-unit",
     "nav.dashboard": "Dashboard",
     "nav.scan": "Scan",
@@ -385,6 +389,10 @@ const I18N = {
     "members.promptGrade": "Grade (1-12, leave blank if not a student):",
     "members.gradeShort": "Grade {n}",
     "members.allGrades": "All grades",
+    "members.printSelected": "Print selected",
+    "members.selectAllShown": "Select all shown",
+    "members.clearSelection": "Clear selection",
+    "members.noneSelected": "Nothing selected — pick at least one member to print",
   },
 };
 
