@@ -215,15 +215,41 @@ generic placeholder.
   then re-import.
 - **Mark items done:** both the Dashboard and the ዕቅድ tab have a
   "ተከናውኗል ✓" button — add a short note (e.g. "given to 12 members") and
-  it's logged with today's date. Recurring items (monthly meeting,
-  quarterly reports, etc.) automatically push their next-due date
-  forward; one-off/as-needed items just log the note.
-- **Edit timing/cadence** per item from the ዕቅድ tab — Ethiopian month
-  names in the plan text aren't converted to exact Gregorian recurrence
-  automatically, so double-check/adjust each item's "repeat every N
-  days" the first time you import.
+  it's logged with today's date. The next due date then gets
+  recalculated — see the Ethiopian calendar section below for exactly how.
+- **Edit timing/cadence** per item from the ዕቅድ tab if you want to
+  override the automatic schedule (e.g. force a specific day-interval
+  instead of month-based scheduling).
 - **Reset to original:** ዕቅድ tab → "ወደ መጀመሪያው ዕቅድ መልስ" wipes any edits
   and restores the exact docx-derived plan.
+
+## Ethiopian-calendar-aware due dates
+Plan items are scheduled using an exact Ethiopian↔Gregorian conversion
+(not an approximation — the Ethiopian calendar's 12×30-day months + a
+5/6-day 13th month make simple day-arithmetic mathematically correct
+once you know Meskerem 1's Gregorian date for a given year, which
+`ethiopian-calendar.js` computes directly rather than looking up a table).
+
+- The plan's own `timing` text is read directly: if it names an
+  Ethiopian month (ጥቅምት, ነሐሴ, a range like "ግንቦት–ሰኔ", a comma list like
+  "ህዳር፣ የካቲት፣ ግንቦት፣ ነሐሴ", etc.), the next due date is calculated as the
+  nearest upcoming occurrence of any of those months — wrapping to next
+  Ethiopian year once this year's are all past. Finishing the ህዳር
+  quarterly report, for example, automatically schedules the item's due
+  date to የካቲት of the same Ethiopian year, not just "+91 days."
+- Every plan item and Dashboard reminder shows its due date in both
+  calendars, e.g. `1 ህዳር 2019 (2026-11-10)`, plus today's Ethiopian
+  date at the top of the Dashboard.
+- Text that doesn't name a specific month — "እንደአስፈላጊነቱ", "ዓመቱን ሙሉ",
+  "እንደተቀላቀሉ ወዲያውኑ" — falls back to the existing day-interval heuristic
+  (monthly/quarterly/twice-yearly/annual, guessed from keywords), since
+  there's no specific month to schedule against.
+- Generated Word/PPT reports show each period's date range in both
+  calendars too.
+- This only reschedules going forward from now on. Plan items seeded
+  before this feature was added keep whatever `nextDate` they already
+  had until the next time they're marked done or their timing is
+  edited — nothing gets silently rewritten on upgrade.
 
 ## Grades 1–12
 Every member can now have a grade (1–12) — set it when adding a member
@@ -276,6 +302,8 @@ automatically via the regular online-event listener.
   skips the manual copy-paste step (see "Optional: connect Supabase")
 - `i18n.js` — full AM/EN dictionary + `t()` helper + language toggle with
   automatic browser-locale detection on first run
+- `ethiopian-calendar.js` — exact Ethiopian↔Gregorian date conversion +
+  Ethiopian-month-name parsing, used to schedule and display plan due dates
 - `auth.js` — Supabase client init, sign-in/sign-up screens, role lookup,
   cloud sync
 - `app.js` — IndexedDB, Excel import/export, QR gen/scan (batch queue),

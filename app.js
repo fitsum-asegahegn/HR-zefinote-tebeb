@@ -121,12 +121,13 @@ async function ensurePlanItems() {
   if (existing.length) return;
   const today = new Date();
   const seedRow = async (row, category) => {
-    const next = row.recurrenceDays > 0 ? addDays(today, 14) : null;
+    const ethNext = computeEthAwareNextDate(row.timing, today);
+    const fallbackNext = row.recurrenceDays > 0 ? isoDate(addDays(today, 14)) : null;
     await put("planItems", {
       id: uid(), no: row.no, category, subUnit: row.subUnit, title: row.title, details: row.details,
       outcome: row.outcome, indicator: row.indicator, metricTarget: row.metricTarget, timing: row.timing,
       executor: row.executor, budget: row.budget, recurrenceDays: row.recurrenceDays, autoMetric: row.autoMetric || null,
-      nextDate: next ? isoDate(next) : null, lastDone: null, doneLog: [],
+      nextDate: ethNext || fallbackNext, lastDone: null, doneLog: [],
     });
   };
   for (const row of DEFAULT_PLAN_MAIN) await seedRow(row, "main");
@@ -154,7 +155,9 @@ async function markPlanItemDone(id, note) {
   e.lastDone = today;
   e.doneLog = e.doneLog || [];
   e.doneLog.push({ date: today, note: note || "" });
-  if (e.recurrenceDays > 0) e.nextDate = isoDate(addDays(new Date(), e.recurrenceDays));
+  const ethNext = computeEthAwareNextDate(e.timing, new Date());
+  if (ethNext) e.nextDate = ethNext;
+  else if (e.recurrenceDays > 0) e.nextDate = isoDate(addDays(new Date(), e.recurrenceDays));
   await put("planItems", e);
 }
 
@@ -465,6 +468,7 @@ async function renderDashboard() {
   const thr = settings.absenceThreshold || 3;
 
   el("view").innerHTML = `
+    <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;margin-top:0;">📅 ${ethLabel(today)}</p>
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-num">${members.length}</div><div class="stat-label">${t("dash.totalMembers")}</div></div>
       <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">${t("dash.todayAttendance")}</div></div>
@@ -485,7 +489,7 @@ async function renderDashboard() {
     <h3 class="section-title">${t("dash.hrTitle")}</h3>
     <div class="list">${hrDue.map(e => `
       <div class="list-row">
-        <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + e.nextDate : ""}</span></div>
+        <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + ethLabel(e.nextDate) + " (" + e.nextDate + ")" : ""}</span></div>
         <div class="row-actions">
           ${e.overdue ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
           <button class="btn-small" onclick="doneHrEvent('${e.id}')">${t("dash.markDone")}</button>
@@ -1201,7 +1205,9 @@ async function importPlanFromWorkbook(file) {
       no, subUnit, title: String(title).trim(), details, outcome, indicator, metricTarget, timing,
       executor, budget, category, recurrenceDays: guessRecurrenceDays(timing),
     });
-    if (item.recurrenceDays > 0 && !item.nextDate) item.nextDate = isoDate(addDays(new Date(), 14));
+    const ethNext = computeEthAwareNextDate(timing, new Date());
+    if (ethNext) item.nextDate = ethNext;
+    else if (item.recurrenceDays > 0 && !item.nextDate) item.nextDate = isoDate(addDays(new Date(), 14));
     await put("planItems", item);
     count++;
   }
@@ -1230,11 +1236,12 @@ async function renderPlan() {
     const today = todayISO();
     const overdue = p.nextDate && p.nextDate <= today;
     const lastLog = p.doneLog && p.doneLog.length ? p.doneLog[p.doneLog.length - 1] : null;
+    const dueLine = p.nextDate ? `<br><span class="muted">${t("plan.nextDue")}: ${ethLabel(p.nextDate)} (${p.nextDate})</span>` : "";
     return `
       <div class="list-row" style="align-items:flex-start;">
         <div style="flex:1;">
           <b>${p.title}</b><br>
-          <span class="muted">${p.timing} · ${p.executor}</span><br>
+          <span class="muted">${p.timing} · ${p.executor}</span>${dueLine}<br>
           <span class="muted">${t("plan.doneLogTitle")}: ${lastLog ? lastLog.date + (lastLog.note ? " — " + lastLog.note : "") : t("plan.noDoneLog")} (${(p.doneLog || []).length}x)</span>
         </div>
         <div class="row-actions" style="flex-direction:column;align-items:flex-end;gap:6px;">
@@ -1306,8 +1313,10 @@ window.editPlanTiming = async (id) => {
   const recurrenceDays = recStr === null ? p.recurrenceDays : Number(recStr) || 0;
   p.timing = timing;
   p.recurrenceDays = recurrenceDays;
-  if (recurrenceDays > 0 && !p.nextDate) p.nextDate = isoDate(addDays(new Date(), 14));
-  if (recurrenceDays === 0) p.nextDate = null;
+  const ethNext = computeEthAwareNextDate(timing, new Date());
+  if (ethNext) p.nextDate = ethNext;
+  else if (recurrenceDays > 0) p.nextDate = isoDate(addDays(new Date(), 14));
+  else p.nextDate = null;
   await put("planItems", p);
   renderPlan();
 };
@@ -1428,7 +1437,7 @@ async function generateWordReport(data) {
     sections: [{
       children: [
         new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: t("app.title") })] }),
-        new Paragraph({ children: [new TextRun({ text: `${periodLabel}  ·  ${data.startISO} → ${data.endISO}`, italics: true })] }),
+        new Paragraph({ children: [new TextRun({ text: `${periodLabel}  ·  ${data.startISO} → ${data.endISO}  (${ethLabel(data.startISO)} → ${ethLabel(data.endISO)})`, italics: true })] }),
         new Paragraph({ text: "" }),
         new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance" })] }),
         new Paragraph({ text: `${lang === "am" ? "አጠቃላይ አባላት" : "Total members"}: ${data.totals.totalMembers}` }),
@@ -1465,7 +1474,7 @@ async function generatePptReport(data) {
 
   const s1 = pptx.addSlide({ masterName: "MASTER" });
   s1.addText(t("app.title"), { x: 0.5, y: 1.8, w: 9, h: 1, fontSize: 32, bold: true, color: "F2A33C" });
-  s1.addText(`${periodLabel}  ·  ${data.startISO} → ${data.endISO}`, { x: 0.5, y: 2.8, w: 9, h: 0.6, fontSize: 16, color: "F2EDE6" });
+  s1.addText(`${periodLabel}  ·  ${data.startISO} → ${data.endISO}  (${ethLabel(data.startISO)} → ${ethLabel(data.endISO)})`, { x: 0.5, y: 2.8, w: 9, h: 0.6, fontSize: 14, color: "F2EDE6" });
 
   const s2 = pptx.addSlide({ masterName: "MASTER" });
   s2.addText(lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance", { x: 0.4, y: 0.3, w: 9, h: 0.6, fontSize: 24, bold: true, color: "F2A33C" });
