@@ -393,6 +393,7 @@ function el(id) { return document.getElementById(id); }
 function applyStaticI18n() {
   el("headerTitle").textContent = t("app.title");
   el("headerSub").textContent = t("app.subtitle");
+  el("headerMotto").textContent = t("app.motto");
   document.querySelectorAll(".tab-btn").forEach((b) => { b.querySelector(".lbl").textContent = t("nav." + b.dataset.tab); });
   document.documentElement.lang = getLang();
   const langBtn = el("langToggle");
