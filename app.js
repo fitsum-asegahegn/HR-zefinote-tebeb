@@ -929,7 +929,6 @@ async function renderSettings() {
       ` : ""}
       <div class="toolbar">
         ${session ? `<button id="signOutBtn" class="btn-secondary">${t("settings.signOut")}</button>` : `<button id="goAuthBtn" class="btn-secondary">${t("settings.goSignIn")}</button>`}
-        <button id="disconnectBtn" class="btn-secondary">${t("settings.disconnectCloud")}</button>
       </div>
     ` : `
       <p class="muted">${t("settings.notConnected")}</p>
@@ -974,7 +973,6 @@ async function renderSettings() {
     alert(t("settings.saved"));
   };
   if (el("connectBtn")) el("connectBtn").onclick = () => { saveSupabaseConfig(el("cl_url").value.trim(), el("cl_key").value.trim()); setSkipCloud(false); boot(); };
-  if (el("disconnectBtn")) el("disconnectBtn").onclick = () => { clearSupabaseConfig(); setSkipCloud(true); boot(); };
   if (el("signOutBtn")) el("signOutBtn").onclick = signOut;
   if (el("goAuthBtn")) el("goAuthBtn").onclick = () => { setSkipCloud(false); appState = "auth"; renderAuthScreen(); };
   if (el("saveDisplayNameBtn")) el("saveDisplayNameBtn").onclick = async () => {

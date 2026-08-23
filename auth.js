@@ -62,8 +62,7 @@ function renderSupabaseSetup() {
       <p class="muted">${t("auth.setupDesc")}</p>
       <input id="su_url" class="text-input" placeholder="${t("auth.urlPlaceholder")}" value="${cfg.url}"/>
       <input id="su_key" class="text-input" placeholder="${t("auth.keyPlaceholder")}" value="${cfg.key}"/>
-      <button id="su_continue" class="btn-primary" style="width:100%;margin-bottom:10px;">${t("auth.continue")}</button>
-      <button id="su_skip" class="btn-secondary" style="width:100%;">${t("auth.skipOffline")}</button>
+      <button id="su_continue" class="btn-primary" style="width:100%;">${t("auth.continue")}</button>
     </div>
   `;
   el("su_continue").onclick = () => {
@@ -72,10 +71,6 @@ function renderSupabaseSetup() {
     if (!url || !key) return;
     saveSupabaseConfig(url, key);
     setSkipCloud(false);
-    boot();
-  };
-  el("su_skip").onclick = () => {
-    setSkipCloud(true);
     boot();
   };
 }
@@ -90,12 +85,10 @@ function renderAuthScreen() {
         <input id="a_pass" class="text-input" type="password" placeholder="${t("auth.password")}"/>
         <div id="a_err" class="muted" style="color:var(--red);min-height:18px;"></div>
         <button id="a_submit" class="btn-primary" style="width:100%;margin-bottom:10px;">${mode === "in" ? t("auth.signInBtn") : t("auth.signUpBtn")}</button>
-        <button id="a_switch" class="btn-secondary" style="width:100%;margin-bottom:10px;">${mode === "in" ? t("auth.switchToSignUp") : t("auth.switchToSignIn")}</button>
-        <button id="a_reconfig" class="btn-small">${t("auth.reconfigure")}</button>
+        <button id="a_switch" class="btn-secondary" style="width:100%;">${mode === "in" ? t("auth.switchToSignUp") : t("auth.switchToSignIn")}</button>
       </div>
     `;
     el("a_switch").onclick = () => { mode = mode === "in" ? "up" : "in"; draw(); };
-    el("a_reconfig").onclick = () => { clearSupabaseConfig(); boot(); };
     el("a_submit").onclick = async () => {
       const email = el("a_email").value.trim();
       const password = el("a_pass").value;
