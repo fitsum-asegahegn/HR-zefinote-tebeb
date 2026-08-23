@@ -1126,7 +1126,7 @@ function drawCharts(attendance, progs, gradeStats) {
     chartInstances.push(new Chart(trendCanvas, {
       type: "line",
       data: { labels: dates, datasets: [{ label: t("charts.attendanceTrend"), data: dates.map((d) => byDate[d]), borderColor: "#f2a33c", backgroundColor: "rgba(242,163,60,0.15)", tension: 0.3, fill: true }] },
-      options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
     }));
   } else if (trendCanvas) {
     trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
@@ -1146,7 +1146,7 @@ function drawCharts(attendance, progs, gradeStats) {
           { label: t("scan.late"), data: late, backgroundColor: "#e0605a" },
         ],
       },
-      options: { scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
+      options: { maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
     }));
   } else if (progCanvas) {
     progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
@@ -1163,6 +1163,7 @@ function drawCharts(attendance, progs, gradeStats) {
         datasets: [{ label: t("charts.byGrade"), data: rowsAsc.map((r) => Math.round(r.rate * 100)), backgroundColor: "#f2a33c" }],
       },
       options: {
+        maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.y + "%" } } },
         scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187", callback: (v) => v + "%" }, beginAtZero: true } },
       },
