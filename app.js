@@ -1115,7 +1115,18 @@ async function renderReports() {
 
 function drawCharts(attendance, progs, gradeStats) {
   destroyCharts();
-  if (typeof Chart === "undefined") return;
+  if (typeof Chart === "undefined") {
+    // Chart.js didn't load — most often a stale cached app shell (see
+    // README: bump sw.js's CACHE version and force-reload) or no signal
+    // the very first time the app opens. Surface it instead of leaving
+    // silent blank boxes, since that's impossible to tell apart from
+    // "not enough data" otherwise.
+    ["trendChart", "progChart", "gradeChart"].forEach((id) => {
+      const c = el(id);
+      if (c) c.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.libFailed") }));
+    });
+    return;
+  }
 
   // Attendance trend: total scans per session date, last 12 dates
   const byDate = {};
@@ -1123,11 +1134,15 @@ function drawCharts(attendance, progs, gradeStats) {
   const dates = Object.keys(byDate).sort().slice(-12);
   const trendCanvas = el("trendChart");
   if (dates.length && trendCanvas) {
-    chartInstances.push(new Chart(trendCanvas, {
-      type: "line",
-      data: { labels: dates, datasets: [{ label: t("charts.attendanceTrend"), data: dates.map((d) => byDate[d]), borderColor: "#f2a33c", backgroundColor: "rgba(242,163,60,0.15)", tension: 0.3, fill: true }] },
-      options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
-    }));
+    try {
+      chartInstances.push(new Chart(trendCanvas, {
+        type: "line",
+        data: { labels: dates, datasets: [{ label: t("charts.attendanceTrend"), data: dates.map((d) => byDate[d]), borderColor: "#f2a33c", backgroundColor: "rgba(242,163,60,0.15)", tension: 0.3, fill: true }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
+      }));
+    } catch (err) {
+      trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
+    }
   } else if (trendCanvas) {
     trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
   }
@@ -1135,19 +1150,23 @@ function drawCharts(attendance, progs, gradeStats) {
   // By program: total scans per program, on-time vs late
   const progCanvas = el("progChart");
   if (attendance.length && progCanvas) {
-    const onTime = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "on-time").length);
-    const late = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "late").length);
-    chartInstances.push(new Chart(progCanvas, {
-      type: "bar",
-      data: {
-        labels: progs.map((p) => p.name),
-        datasets: [
-          { label: t("scan.onTime"), data: onTime, backgroundColor: "#4caf7d" },
-          { label: t("scan.late"), data: late, backgroundColor: "#e0605a" },
-        ],
-      },
-      options: { maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
-    }));
+    try {
+      const onTime = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "on-time").length);
+      const late = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "late").length);
+      chartInstances.push(new Chart(progCanvas, {
+        type: "bar",
+        data: {
+          labels: progs.map((p) => p.name),
+          datasets: [
+            { label: t("scan.onTime"), data: onTime, backgroundColor: "#4caf7d" },
+            { label: t("scan.late"), data: late, backgroundColor: "#e0605a" },
+          ],
+        },
+        options: { maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
+      }));
+    } catch (err) {
+      progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
+    }
   } else if (progCanvas) {
     progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
   }
@@ -1155,19 +1174,23 @@ function drawCharts(attendance, progs, gradeStats) {
   // By grade (1-12): attendance rate = scans / (members in grade × sessions), makes uneven class sizes comparable
   const gradeCanvas = el("gradeChart");
   if (gradeStats && gradeStats.rows.length && gradeCanvas) {
-    const rowsAsc = [...gradeStats.rows].sort((a, b) => a.grade - b.grade);
-    chartInstances.push(new Chart(gradeCanvas, {
-      type: "bar",
-      data: {
-        labels: rowsAsc.map((r) => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade),
-        datasets: [{ label: t("charts.byGrade"), data: rowsAsc.map((r) => Math.round(r.rate * 100)), backgroundColor: "#f2a33c" }],
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.y + "%" } } },
-        scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187", callback: (v) => v + "%" }, beginAtZero: true } },
-      },
-    }));
+    try {
+      const rowsAsc = [...gradeStats.rows].sort((a, b) => a.grade - b.grade);
+      chartInstances.push(new Chart(gradeCanvas, {
+        type: "bar",
+        data: {
+          labels: rowsAsc.map((r) => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade),
+          datasets: [{ label: t("charts.byGrade"), data: rowsAsc.map((r) => Math.round(r.rate * 100)), backgroundColor: "#f2a33c" }],
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.y + "%" } } },
+          scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187", callback: (v) => v + "%" }, beginAtZero: true } },
+        },
+      }));
+    } catch (err) {
+      gradeCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
+    }
   } else if (gradeCanvas) {
     gradeCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
   }

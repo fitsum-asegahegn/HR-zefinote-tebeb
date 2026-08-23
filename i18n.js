@@ -168,6 +168,8 @@ const I18N = {
     "charts.byProgram": "በፕሮግራም የተከፋፈለ",
     "charts.byGrade": "በክፍል ደረጃ (1-12) የተሳትፎ መጠን",
     "charts.noData": "ገና በቂ መረጃ የለም",
+    "charts.libFailed": "የግራፍ ላይብረሪ አልተጫነም — ኢንተርኔት ያረጋግጡ ወይም መተግበሪያውን እንደገና ይክፈቱ",
+    "charts.renderError": "ግራፍ መሳል አልተቻለም",
 
     "notif.title": "🔔 የማሳወቂያ ቅንብር",
     "notif.enable": "በዚህ መሳሪያ ማሳወቂያ አብራ",
@@ -370,6 +372,8 @@ const I18N = {
     "charts.byProgram": "By program",
     "charts.byGrade": "Attendance rate by grade (1-12)",
     "charts.noData": "Not enough data yet",
+    "charts.libFailed": "Chart library failed to load — check your connection or reopen the app",
+    "charts.renderError": "Couldn't draw chart",
 
     "notif.title": "🔔 Notification settings",
     "notif.enable": "Enable notifications on this device",
