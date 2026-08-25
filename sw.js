@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v16";
+const CACHE = "finote-attendance-v17";
 
 const APP_SHELL = [
   "./",
@@ -20,6 +20,7 @@ const RUNTIME_LIBS = [
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
   "https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js",
+  "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js",
   "https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js",
   "https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js",
 ];
@@ -62,11 +63,7 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
-/* ---------- Background Sync (best-effort) ----------
-   Progressive enhancement only: works on Chromium/Android when the tag is
-   registered from app.js after an offline scan. Not supported on iOS
-   Safari — the existing `online` event listener in auth.js is the
-   reliable fallback used whenever the app itself is open. */
+/* ---------- Background Sync (best-effort) ---------- */
 const SW_DB_NAME = "finote_attendance";
 function swOpenDB() {
   return new Promise((resolve, reject) => {
@@ -125,7 +122,7 @@ async function backgroundSyncAttendance() {
       }
     }
   } catch (e) {
-    // best-effort; the app's own online-event sync will retry when it's next opened
+    // best-effort
   }
 }
 
