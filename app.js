@@ -164,18 +164,19 @@ function addMonths(d, n) { const nd = new Date(d); nd.setMonth(nd.getMonth() + n
 function todayISO() { return isoDate(new Date()); }
 function fmtDT(iso) { const d = new Date(iso); return d.toLocaleString(getLang() === "en" ? "en-GB" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
+// ---------- Ethiopian time conversion (for Settings UI) ----------
 function gregorianToEthiopianTime(gregorianStr) {
   if (!gregorianStr) return "";
   const [h, m] = gregorianStr.split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return gregorianStr;
-  const ethH = (h - 6 + 24) % 24;       // ✅ subtract 6 (Gregorian → Ethiopian)
+  const ethH = (h - 6 + 24) % 24;
   return `${String(ethH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 function ethiopianToGregorianTime(ethiopianStr) {
   if (!ethiopianStr) return "";
   const [h, m] = ethiopianStr.split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return ethiopianStr;
-  const gregH = (h + 6) % 24;           // ✅ add 6 (Ethiopian → Gregorian)
+  const gregH = (h + 6) % 24;
   return `${String(gregH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
@@ -365,6 +366,29 @@ async function computeConsecutiveAbsences() {
   }
   return results;
 }
+
+// NEW: Program‑specific absence tracking
+async function computeProgramSpecificAbsences(programKey) {
+  const members = (await getAll("members")).filter((m) => m.active !== false);
+  const attendance = await getAll("attendance");
+  const progAttendance = attendance.filter(a => a.programKey === programKey);
+  const sessionDates = [...new Set(progAttendance.map((a) => a.sessionDate))].sort().reverse();
+  const settings = await getSettings();
+  const threshold = Number(settings.absenceThreshold) || 3;
+  const results = [];
+  for (const mem of members) {
+    let streak = 0;
+    for (const d of sessionDates) {
+      const present = progAttendance.some((a) => a.memberId === mem.id && a.sessionDate === d);
+      if (present) break;
+      streak++;
+      if (streak >= threshold) break;
+    }
+    if (streak >= threshold) results.push({ member: mem, streak, programKey });
+  }
+  return results;
+}
+
 async function computeConfessionDue() {
   const members = (await getAll("members")).filter((m) => m.active !== false);
   const settings = await getSettings();
@@ -487,6 +511,12 @@ function absenteeRow(a) {
     ? `<a href="tel:${m.phone.replace(/\s+/g, "")}" class="phone-link" onclick="event.stopPropagation();">${m.phone}</a>`
     : t("dash.noPhone");
   const log = m.callLog;
+  // Show program name if it's a specific program filter
+  let badgeText = t("dash.streakBadge", { n: a.streak });
+  if (a.programKey) {
+    const prog = PROGRAM_DEFS().find(p => p.key === a.programKey);
+    if (prog) badgeText = `${a.streak} ${t("dash.streakIn")} ${prog.name}`;
+  }
   return `
     <div class="list-row" style="align-items:flex-start;">
       <div style="flex:1;">
@@ -497,7 +527,7 @@ function absenteeRow(a) {
           : ""}
       </div>
       <div class="row-actions" style="flex-direction:column;align-items:flex-end;gap:6px;">
-        <div class="badge badge-red">${t("dash.streakBadge", { n: a.streak })}</div>
+        <div class="badge badge-red">${badgeText}</div>
         ${log && log.called
           ? `<span class="badge badge-green">${t("dash.alreadyCalled")}</span><button class="btn-small" onclick="uncallMember('${m.id}')">${t("dash.undoCall")}</button>`
           : `<button class="btn-small" onclick="callMember('${m.id}')">${t("dash.markCalled")}</button>`}
@@ -535,23 +565,49 @@ window.uncallMember = async (memberId) => {
 };
 
 async function renderDashboard() {
-  const [absentees, confessionDue, hrDue, settings] = await Promise.all([computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(), getSettings()]);
+  // Get filter value from session storage or default to "all"
+  const currentFilter = window._absenceFilter || "all";
+  // Compute absences based on filter
+  let absentees;
+  if (currentFilter === "all") {
+    absentees = await computeConsecutiveAbsences();
+  } else {
+    absentees = await computeProgramSpecificAbsences(currentFilter);
+  }
+  const [confessionDue, hrDue, settings] = await Promise.all([computeConfessionDue(), computePlanReminders(), getSettings()]);
   const members = await getAll("members");
   const attendance = await getAll("attendance");
   const today = todayISO();
   const todayCount = attendance.filter((a) => a.sessionDate === today).length;
   const thr = settings.absenceThreshold || 3;
 
+  // Build filter dropdown
+  const filterOptions = [
+    { value: "all", label: t("dash.filterAll") },
+    { value: "timhert", label: t("dash.filterCourse") },
+    { value: "mezmur", label: t("dash.filterMezmur") },
+    { value: "tselot", label: t("dash.filterTselot") },
+  ];
+  const filterHtml = `
+    <div class="toolbar" style="margin-top:10px;">
+      <label class="muted" style="font-size:0.78rem;">${t("dash.filterLabel")}</label>
+      <select id="absenceFilter" class="text-input" style="width:auto;flex:1;">
+        ${filterOptions.map(o => `<option value="${o.value}" ${o.value===currentFilter?'selected':''}>${o.label}</option>`).join('')}
+      </select>
+    </div>
+  `;
+
   el("view").innerHTML = `
     <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;margin-top:0;">📅 ${ethLabel(today)}</p>
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-num">${members.length}</div><div class="stat-label">${t("dash.totalMembers")}</div></div>
       <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">${t("dash.todayAttendance")}</div></div>
-      <div class="stat-card"><div class="stat-num">${absentees.length}</div><div class="stat-label">${t("dash.consecutiveAbsent", { n: thr })}</div></div>
+      <div class="stat-card"><div class="stat-num">${absentees.length}</div><div class="stat-label">${currentFilter === 'all' ? t("dash.consecutiveAbsent", { n: thr }) : t("dash.filteredAbsent")}</div></div>
       <div class="stat-card"><div class="stat-num">${confessionDue.length}</div><div class="stat-label">${t("dash.confessionDueStat")}</div></div>
     </div>
 
     <h3 class="section-title">${t("dash.callListTitle", { n: thr })}</h3>
+    ${filterHtml}
     ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
 
     <h3 class="section-title">${t("dash.confessionTitle")}</h3>
@@ -572,6 +628,15 @@ async function renderDashboard() {
       </div>`).join("")}</div>
     <p class="muted" style="margin-top:6px;"><a href="#" onclick="setTab('plan');return false;" style="color:var(--amber);">${t("dash.viewFullPlan")}</a></p>
   `;
+
+  // Attach change event to the filter dropdown
+  const filterEl = el("absenceFilter");
+  if (filterEl) {
+    filterEl.onchange = (e) => {
+      window._absenceFilter = e.target.value;
+      renderDashboard();
+    };
+  }
 }
 window.markConfessed = async (memberId) => { const m = await get("members", memberId); m.lastConfessionDate = todayISO(); m.synced = false; await put("members", m); renderDashboard(); };
 window.doneHrEvent = async (id) => {
@@ -973,7 +1038,6 @@ async function renderSettings() {
   const session = await getSession();
   const cfg = getSupabaseConfig();
   
-  // Helper to format time for display based on language
   function displayTime(gregTime) {
     if (getLang() === 'am' && gregTime) {
       return gregorianToEthiopianTime(gregTime);
