@@ -1,7 +1,7 @@
 /* ---------- i18n ---------- */
 const I18N = {
   am: {
-    "app.title": "ፍኖተ ጥበብ — ዲጂታል መገኘት",
+    "app.title": "ፍኖተ ጥበብ — ዲጂታል አቴንዳንስ",
     "app.subtitle": "QR-based offline attendance · HR ንዑስ ክፍል",
     "app.motto": "አባላትን መጠበቅ፣ ማጽደቅ እና ማጽናት",
     "nav.dashboard": "ዳሽቦርድ",
@@ -205,7 +205,7 @@ const I18N = {
     "members.noneSelected": "ምንም አልተመረጠም — ለማተም ቢያንስ አንድ አባል ይምረጡ",
   },
   en: {
-    "app.title": "Finote Tsibeb — Digital Attendance",
+    "app.title": "Finote Tibeb — Digital Attendance",
     "app.subtitle": "QR-based offline attendance · HR sub-unit",
     "app.motto": "Protecting, Confirming, and Strengthening Our Members",
     "nav.dashboard": "Dashboard",
