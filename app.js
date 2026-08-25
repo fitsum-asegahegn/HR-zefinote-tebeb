@@ -1153,7 +1153,7 @@ async function unlockWithBiometric() {
 let chartInstances = [];
 function destroyCharts() { chartInstances.forEach((c) => c.destroy()); chartInstances = []; }
 
-// ---------- Updated drawCharts using Chart.js (with scroll & nice dates) ----------
+// ---------- Updated drawCharts using Chart.js with zoom ----------
 function drawCharts(attendance, progs, gradeStats) {
   destroyCharts();
 
@@ -1165,18 +1165,14 @@ function drawCharts(attendance, progs, gradeStats) {
     });
   }
 
-  // ---- Trend chart (scrollable) ----
+  // ---- Attendance trend (with pan + zoom) ----
   const trendCanvas = el("trendChart");
   if (trendCanvas) {
-    // Wrap in scroll container if not already done
-    let parent = trendCanvas.parentElement;
-    if (!parent.classList.contains('chart-scroll-wrap')) {
-      const wrap = document.createElement('div');
-      wrap.className = 'chart-scroll-wrap';
-      wrap.style.cssText = 'overflow-x:auto; overflow-y:hidden; width:100%;';
-      parent.replaceChild(wrap, trendCanvas);
-      wrap.appendChild(trendCanvas);
-      trendCanvas.style.minWidth = '600px';
+    // Remove any previous scroll wrapper if it exists
+    const parent = trendCanvas.parentElement;
+    if (parent && parent.classList.contains('chart-scroll-wrap')) {
+      parent.replaceWith(trendCanvas);
+      trendCanvas.style.minWidth = '';
     }
 
     const byDate = {};
@@ -1187,7 +1183,8 @@ function drawCharts(attendance, progs, gradeStats) {
 
     if (typeof Chart !== 'undefined') {
       const ctx = trendCanvas.getContext('2d');
-      chartInstances.push(new Chart(ctx, {
+      // Register the zoom plugin for this chart
+      const chart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: labels,
@@ -1209,6 +1206,20 @@ function drawCharts(attendance, progs, gradeStats) {
               callbacks: {
                 label: (ctx) => `${ctx.parsed.y} ${getLang() === 'am' ? 'ቅኝት' : 'scans'}`
               }
+            },
+            zoom: {
+              pan: {
+                enabled: true,
+                mode: 'x',
+              },
+              zoom: {
+                enabled: true,
+                mode: 'x',
+                drag: false,
+                limits: {
+                  x: { minRange: 2 }
+                }
+              }
             }
           },
           scales: {
@@ -1221,8 +1232,10 @@ function drawCharts(attendance, progs, gradeStats) {
               grid: { color: 'rgba(255,255,255,0.06)' }
             }
           }
-        }
-      }));
+        },
+        plugins: [ChartZoom] // activate the zoom plugin
+      });
+      chartInstances.push(chart);
     } else {
       // fallback
       FinoteCharts.drawLineChart(trendCanvas, labels, data, { noDataText: t('charts.noData') });
