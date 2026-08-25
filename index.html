@@ -80,13 +80,13 @@
   .scan-reticle .br{ bottom:0; right:0; border-left:none; border-top:none; border-radius:0 0 6px 0; }
   #scanStatus{ display:flex; align-items:center; gap:6px; color:var(--green); font-family:var(--mono, monospace); font-size:0.78rem; }
 
-  nav.tabs{ position:fixed; bottom:0; left:0; right:0; background:var(--bg2); border-top:1px solid var(--border); z-index:20; }
+  nav.tabs{ position:fixed; bottom:0; left:0; right:0; background:var(--bg2); border-top:1px solid var(--border); z-index:20; display:flex; }
   .tab-btn{ flex:1; background:transparent; color:var(--muted); padding:10px 0 8px; display:flex; flex-direction:column; align-items:center; gap:2px; font-size:0.66rem; }
   .tab-btn .ic{ font-size:1.15rem; }
   .tab-btn.active{ color:var(--amber); }
 
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:50; }
-  .modal-inner{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; text-align:center; }
+  .modal-inner{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; text-align:center; max-height:90vh; overflow-y:auto; }
   .modal-inner button{ margin-top:12px; }
 
   .toast{
@@ -94,7 +94,13 @@
     background:var(--amber); color:#1a1410; font-weight:700; padding:10px 20px;
     border-radius:20px; z-index:60; font-size:0.85rem; box-shadow:0 4px 14px rgba(0,0,0,0.4);
   }
-  .chart-box{ position:relative; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; margin-bottom:8px; height:220px; }
+  .chart-box{ position:relative; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; margin-bottom:8px; height:220px; overflow:hidden; }
+  .chart-scroll-wrap{
+    overflow-x:auto; overflow-y:hidden; width:100%; height:100%;
+  }
+  .chart-scroll-wrap canvas{
+    min-width:600px; height:100% !important;
+  }
 
   .auth-wrap{ max-width:380px; margin:40px auto; background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; text-align:center; }
   .auth-wrap h2{ margin-top:0; }
@@ -146,7 +152,9 @@
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
+  <!-- Chart.js with time adapter for nice date formatting -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
   <script src="./config.js"></script>
