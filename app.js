@@ -179,17 +179,49 @@ async function importMembersFromWorkbook(file) {
   for (const row of rows) {
     const name = pick(row, ["ሙሉ ስም", "ስም", "Name", "Full Name", "name"]);
     if (!name) continue;
+    // NEW: read all fields
     const phone = pick(row, ["ስልክ", "ስልክ ቁጥር", "Phone", "phone"]);
-    const category = pick(row, ["ምድብ", "Category", "category"]) || "";
+    const category = pick(row, ["የሚያገለግሉበት ክፍል", "Assigned Department", "category"]);
     const gradeRaw = pick(row, ["ክፍል ደረጃ", "ክፍል", "Grade", "grade"]);
     const grade = normalizeGrade(gradeRaw);
     const confDate = pick(row, ["ንስሃ ቀን", "የመጨረሻ ንስሃ", "Last Confession", "lastConfession"]);
+    // New fields
+    const christianName = pick(row, ["የክርስትና ስም", "Christian Name", "christianName"]);
+    const gender = pick(row, ["ጾታ", "Gender", "gender"]);
+    const age = pick(row, ["ዕድሜ", "Age", "age"]);
+    const altPhone = pick(row, ["ተለዋጭ ስልክ", "Alternate Phone", "altPhone"]);
+    const address = pick(row, ["የመኖሪያ አድራሻ", "Address", "address"]);
+    const confessionFather = pick(row, ["የንስሐ አባት ስም", "Confession Father", "confessionFather"]);
+    const parish = pick(row, ["የሚያገለግሉበት ደብር", "Parish", "parish"]);
+    const parentName = pick(row, ["የወላጅ ስም", "Parent Name", "parentName"]);
+    const parentPhone = pick(row, ["የወላጅ ስልክ", "Parent Phone", "parentPhone"]);
+    const educationLevel = pick(row, ["የዘመናዊ ትምህርት ደረጃ", "Education Level", "educationLevel"]);
+    const spiritualEducation = pick(row, ["በመንፈሳዊ የትምህርት ደረጃ", "Spiritual Education", "spiritualEducation"]);
+    const dept1 = pick(row, ["ምርጫ 1", "Preference 1", "dept1"]);
+    const dept2 = pick(row, ["ምርጫ 2", "Preference 2", "dept2"]);
+    const dept3 = pick(row, ["ምርጫ 3", "Preference 3", "dept3"]);
+
     let member = existingList.find((m) => m.fullName.trim() === String(name).trim());
     if (!member) {
       member = {
         id: uid(), qrId: "FTW1|" + shortId(), fullName: String(name).trim(),
-        phone: phone ? String(phone).trim() : "", category: String(category).trim(), grade,
+        phone: phone ? String(phone).trim() : "", category: category ? String(category).trim() : "", grade,
         lastConfessionDate: parseMaybeDate(confDate), joinDate: todayISO(), active: true, synced: false,
+        // NEW fields
+        christianName: christianName ? String(christianName).trim() : "",
+        gender: gender ? String(gender).trim() : "",
+        age: age ? Number(age) : null,
+        altPhone: altPhone ? String(altPhone).trim() : "",
+        address: address ? String(address).trim() : "",
+        confessionFather: confessionFather ? String(confessionFather).trim() : "",
+        parish: parish ? String(parish).trim() : "",
+        parentName: parentName ? String(parentName).trim() : "",
+        parentPhone: parentPhone ? String(parentPhone).trim() : "",
+        educationLevel: educationLevel ? String(educationLevel).trim() : "",
+        spiritualEducation: spiritualEducation ? String(spiritualEducation).trim() : "",
+        dept1: dept1 ? String(dept1).trim() : "",
+        dept2: dept2 ? String(dept2).trim() : "",
+        dept3: dept3 ? String(dept3).trim() : "",
       };
       existingList.push(member);
     } else {
@@ -197,6 +229,21 @@ async function importMembersFromWorkbook(file) {
       member.category = category ? String(category).trim() : member.category;
       if (grade !== null) member.grade = grade;
       if (confDate) member.lastConfessionDate = parseMaybeDate(confDate);
+      // update new fields if present
+      if (christianName) member.christianName = String(christianName).trim();
+      if (gender) member.gender = String(gender).trim();
+      if (age) member.age = Number(age);
+      if (altPhone) member.altPhone = String(altPhone).trim();
+      if (address) member.address = String(address).trim();
+      if (confessionFather) member.confessionFather = String(confessionFather).trim();
+      if (parish) member.parish = String(parish).trim();
+      if (parentName) member.parentName = String(parentName).trim();
+      if (parentPhone) member.parentPhone = String(parentPhone).trim();
+      if (educationLevel) member.educationLevel = String(educationLevel).trim();
+      if (spiritualEducation) member.spiritualEducation = String(spiritualEducation).trim();
+      if (dept1) member.dept1 = String(dept1).trim();
+      if (dept2) member.dept2 = String(dept2).trim();
+      if (dept3) member.dept3 = String(dept3).trim();
       member.synced = false;
     }
     await put("members", member);
@@ -216,11 +263,33 @@ function normalizeGrade(v) {
   const n = parseInt(String(v).replace(/[^\d]/g, ""), 10);
   return (n >= 1 && n <= 12) ? n : null;
 }
-async function addMemberManual(fullName, phone, category, grade) {
+// NEW: extended add function
+async function addMemberManual(fullName, phone, category, grade, extras = {}) {
   const member = {
-    id: uid(), qrId: "FTW1|" + shortId(), fullName: fullName.trim(), phone: (phone || "").trim(),
-    category: (category || "").trim(), grade: normalizeGrade(grade),
-    lastConfessionDate: null, joinDate: todayISO(), active: true, synced: false,
+    id: uid(), qrId: "FTW1|" + shortId(),
+    fullName: fullName.trim(),
+    phone: (phone || "").trim(),
+    category: (category || "").trim(), // now used as assigned department
+    grade: normalizeGrade(grade),
+    lastConfessionDate: null,
+    joinDate: todayISO(),
+    active: true,
+    synced: false,
+    // NEW fields
+    christianName: extras.christianName || "",
+    gender: extras.gender || "",
+    age: extras.age ? Number(extras.age) : null,
+    altPhone: extras.altPhone || "",
+    address: extras.address || "",
+    confessionFather: extras.confessionFather || "",
+    parish: extras.parish || "",
+    parentName: extras.parentName || "",
+    parentPhone: extras.parentPhone || "",
+    educationLevel: extras.educationLevel || "",
+    spiritualEducation: extras.spiritualEducation || "",
+    dept1: extras.dept1 || "",
+    dept2: extras.dept2 || "",
+    dept3: extras.dept3 || "",
   };
   await put("members", member);
   return member;
@@ -735,9 +804,18 @@ async function renderMembers() {
         <label class="sel-check">
           <input type="checkbox" data-id="${m.id}" ${selected.has(m.id) ? "checked" : ""}/>
         </label>
-        <div style="flex:1;"><b>${m.fullName}</b><br><span class="muted">${m.phone || ""} ${m.category ? "· " + m.category : ""} ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}</span></div>
+        <div style="flex:1;">
+          <b>${m.fullName}</b><br>
+          <span class="muted">
+            ${m.phone || ""}
+            ${m.category ? "· " + m.category : ""} <!-- category is now assigned department -->
+            ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}
+            ${m.christianName ? "· የክርስትና ስም: " + m.christianName : ""}
+          </span>
+        </div>
         <div class="row-actions">
           <button class="btn-small" onclick="showQr('${m.id}')">${t("members.qr")}</button>
+          <button class="btn-small" onclick="openRegistrationModal('${m.id}')">${t("members.edit")}</button>
           ${isAdmin ? `<button class="btn-small" onclick="deleteMember('${m.id}')">${t("members.delete")}</button>` : ""}
         </div>
       </div>`).join("");
@@ -757,13 +835,8 @@ async function renderMembers() {
   el("memberSearch").oninput = applyFilters;
   el("gradeFilter").onchange = applyFilters;
   el("excelInput").onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const count = await importMembersFromWorkbook(file); alert(t("members.importedCount", { n: count })); renderMembers(); };
-  el("addMemberBtn").onclick = async () => {
-    const name = prompt(t("members.promptName")); if (!name) return;
-    const phone = prompt(t("members.promptPhone")) || "";
-    const category = prompt(t("members.promptCategory")) || "";
-    const grade = prompt(t("members.promptGrade")) || "";
-    await addMemberManual(name, phone, category, grade); renderMembers();
-  };
+  // Replace the old add button with modal
+  el("addMemberBtn").onclick = () => openRegistrationModal();
   el("printQrBtn").onclick = () => printAllQr(members);
   el("printSelectedBtn").onclick = () => {
     if (!selected.size) { alert(t("members.noneSelected")); return; }
@@ -837,11 +910,30 @@ async function shareQrPng(qrBoxEl, name) {
 
 async function exportMembersExcel(members) {
   const rows = members.map((m) => ({
-    Name: m.fullName, Phone: m.phone || "", Category: m.category || "", Grade: m.grade || "",
-    LastConfession: m.lastConfessionDate || "", JoinDate: m.joinDate || "", QrId: m.qrId,
-    CurrentlyFlaggedForCall: m.callLog && m.callLog.called ? "yes" : "",
-    LastCallReason: m.callLog ? (m.callLog.reason || "") : "",
-    TotalTimesCalled: (m.callHistory || []).length,
+    "ሙሉ ስም": m.fullName,
+    "የክርስትና ስም": m.christianName || "",
+    "ጾታ": m.gender || "",
+    "ዕድሜ": m.age || "",
+    "ስልክ": m.phone || "",
+    "ተለዋጭ ስልክ": m.altPhone || "",
+    "የመኖሪያ አድራሻ": m.address || "",
+    "የንስሐ አባት ስም": m.confessionFather || "",
+    "የሚያገለግሉበት ደብር": m.parish || "",
+    "የወላጅ ስም": m.parentName || "",
+    "የወላጅ ስልክ": m.parentPhone || "",
+    "የዘመናዊ ትምህርት ደረጃ": m.educationLevel || "",
+    "በመንፈሳዊ የትምህርት ደረጃ": m.spiritualEducation || "",
+    "ክፍል ደረጃ": m.grade || "",
+    "የሚያገለግሉበት ክፍል": m.category || "",
+    "ምርጫ 1": m.dept1 || "",
+    "ምርጫ 2": m.dept2 || "",
+    "ምርጫ 3": m.dept3 || "",
+    "የመጨረሻ ንስሃ ቀን": m.lastConfessionDate || "",
+    "የተቀላቀሉበት ቀን": m.joinDate || "",
+    "QR ID": m.qrId,
+    "በአሁኑ ጊዜ ለጥሪ ተመዝግቧል": m.callLog && m.callLog.called ? "አዎ" : "",
+    "የመጨረሻ ጥሪ ምክንያት": m.callLog ? (m.callLog.reason || "") : "",
+    "ጠቅላላ ጥሪ ቁጥር": (m.callHistory || []).length,
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -1087,7 +1179,8 @@ function drawCharts(attendance, progs, gradeStats) {
   if (trendCanvas) {
     const byDate = {};
     attendance.forEach(a => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
-    const dates = Object.keys(byDate).sort().slice(-12);
+    const allDates = Object.keys(byDate).sort();
+    const dates = allDates.slice(-12);
     if (dates.length) {
       const values = dates.map(d => byDate[d]);
       FinoteCharts.drawLineChart(trendCanvas, dates, values, { noDataText: t("charts.noData") });
@@ -1129,6 +1222,120 @@ function drawCharts(attendance, progs, gradeStats) {
   }
 }
 
+// ---------- Registration Modal (new) ----------
+window.openRegistrationModal = async function(editId) {
+  const member = editId ? await get("members", editId) : null;
+  const isEdit = !!member;
+  const deptOptions = [
+    "ትምህርትና ስልጠና ክፍል",
+    "ዜማና ስነ-ጥበባት ክፍል",
+    "መርኃ ግብርና ጉባኤያት ክፍል",
+    "የሰው ሀብት አስተዳደር ክፍል",
+    "የፋይናንስ እና ንብረት አስተዳደር ክፍል",
+    "እቅድ እና ልማት ክፍል",
+    "መረጃና የውስጥ ግንኙነት ክፍል",
+    "የሕጻናት እና ታዳጊዎች አስተዳደር ክፍል",
+    "ምግባረ ሰናይ ክፍል"
+  ];
+  const deptSelect = (name, selected) => `
+    <select id="${name}" class="text-input">
+      <option value="">---</option>
+      ${deptOptions.map(d => `<option value="${d}" ${d===selected?'selected':''}>${d}</option>`).join('')}
+    </select>`;
+
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.innerHTML = `
+    <div class="modal-inner" style="max-width:500px;max-height:90vh;overflow-y:auto;text-align:left;">
+      <h3>${isEdit ? t("members.editMember") : t("members.addMember")}</h3>
+      <form id="regForm">
+        <label>${t("members.fullName")} *</label>
+        <input id="f_fullName" class="text-input" value="${member?.fullName||''}" required>
+        <label>${t("members.christianName")}</label>
+        <input id="f_christianName" class="text-input" value="${member?.christianName||''}">
+        <label>${t("members.gender")}</label>
+        <select id="f_gender" class="text-input">
+          <option value="">---</option>
+          <option value="ወንድ" ${member?.gender==='ወንድ'?'selected':''}>ወንድ</option>
+          <option value="ሴት" ${member?.gender==='ሴት'?'selected':''}>ሴት</option>
+        </select>
+        <label>${t("members.age")}</label>
+        <input id="f_age" type="number" class="text-input" value="${member?.age||''}">
+        <label>${t("members.phone")}</label>
+        <input id="f_phone" class="text-input" value="${member?.phone||''}">
+        <label>${t("members.altPhone")}</label>
+        <input id="f_altPhone" class="text-input" value="${member?.altPhone||''}">
+        <label>${t("members.address")}</label>
+        <input id="f_address" class="text-input" value="${member?.address||''}">
+        <label>${t("members.confessionFather")}</label>
+        <input id="f_confessionFather" class="text-input" value="${member?.confessionFather||''}">
+        <label>${t("members.parish")}</label>
+        <input id="f_parish" class="text-input" value="${member?.parish||''}">
+        <label>${t("members.parentName")}</label>
+        <input id="f_parentName" class="text-input" value="${member?.parentName||''}">
+        <label>${t("members.parentPhone")}</label>
+        <input id="f_parentPhone" class="text-input" value="${member?.parentPhone||''}">
+        <label>${t("members.educationLevel")}</label>
+        <input id="f_educationLevel" class="text-input" value="${member?.educationLevel||''}">
+        <label>${t("members.spiritualEducation")}</label>
+        <input id="f_spiritualEducation" class="text-input" value="${member?.spiritualEducation||''}">
+        <label>${t("members.grade")}</label>
+        <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}">
+        <label>${t("members.assignedDept")}</label>
+        <input id="f_assignedDept" class="text-input" value="${member?.category||''}" placeholder="${t("members.assignedDeptPlaceholder")}">
+        <label>${t("members.deptPref1")}</label>
+        ${deptSelect('f_dept1', member?.dept1)}
+        <label>${t("members.deptPref2")}</label>
+        ${deptSelect('f_dept2', member?.dept2)}
+        <label>${t("members.deptPref3")}</label>
+        ${deptSelect('f_dept3', member?.dept3)}
+        <div style="display:flex; gap:10px; margin-top:16px;">
+          <button type="submit" class="btn-primary">${isEdit ? t("members.update") : t("members.save")}</button>
+          <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">${t("members.close")}</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(box);
+
+  box.querySelector("#regForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const data = {
+      fullName: el("f_fullName").value.trim(),
+      christianName: el("f_christianName").value.trim(),
+      gender: el("f_gender").value,
+      age: Number(el("f_age").value) || null,
+      phone: el("f_phone").value.trim(),
+      altPhone: el("f_altPhone").value.trim(),
+      address: el("f_address").value.trim(),
+      confessionFather: el("f_confessionFather").value.trim(),
+      parish: el("f_parish").value.trim(),
+      parentName: el("f_parentName").value.trim(),
+      parentPhone: el("f_parentPhone").value.trim(),
+      educationLevel: el("f_educationLevel").value.trim(),
+      spiritualEducation: el("f_spiritualEducation").value.trim(),
+      grade: el("f_grade").value.trim(),
+      category: el("f_assignedDept").value.trim(), // assigned department
+      dept1: el("f_dept1").value,
+      dept2: el("f_dept2").value,
+      dept3: el("f_dept3").value,
+    };
+    if (!data.fullName) { alert(t("members.fullNameRequired")); return; }
+    if (isEdit) {
+      const m = await get("members", member.id);
+      Object.assign(m, data);
+      m.synced = false;
+      await put("members", m);
+    } else {
+      // category parameter is the assigned department
+      await addMemberManual(data.fullName, data.phone, data.category, data.grade, data);
+    }
+    box.remove();
+    renderMembers();
+  };
+};
+
+// ---------- Reports ----------
 async function renderReports() {
   const attendance = (await getAll("attendance")).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const members = await getAll("members");
@@ -1672,9 +1879,20 @@ function fcDrawXLabels(ctx, labels, pad, w, h) {
   ctx.textBaseline = "top";
   const innerW = w - pad.left - pad.right;
   const n = labels.length || 1;
-  labels.forEach((label, i) => {
+  // If there are too many labels, only show a subset to avoid overlap
+  const maxLabels = 12;
+  let indices = labels.map((_, i) => i);
+  if (n > maxLabels) {
+    const step = Math.ceil(n / maxLabels);
+    indices = labels.map((_, i) => i).filter((_, i) => i % step === 0);
+    // always show the last one
+    if (indices[indices.length - 1] !== n - 1) indices.push(n - 1);
+  }
+
+  indices.forEach((i) => {
+    const label = String(labels[i]);
     const x = pad.left + (innerW * (i + 0.5)) / n;
-    ctx.fillText(String(label), x, h - pad.bottom + 6);
+    ctx.fillText(label, x, h - pad.bottom + 6);
   });
 }
 
