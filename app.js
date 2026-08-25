@@ -511,12 +511,18 @@ function absenteeRow(a) {
     ? `<a href="tel:${m.phone.replace(/\s+/g, "")}" class="phone-link" onclick="event.stopPropagation();">${m.phone}</a>`
     : t("dash.noPhone");
   const log = m.callLog;
-  // Show program name if it's a specific program filter
+  
+  // Short badge text
   let badgeText = t("dash.streakBadge", { n: a.streak });
   if (a.programKey) {
     const prog = PROGRAM_DEFS().find(p => p.key === a.programKey);
-    if (prog) badgeText = `${a.streak} ${t("dash.streakIn")} ${prog.name}`;
+    if (prog) {
+      // Remove parentheses and content inside them to get short name
+      const shortName = prog.name.replace(/ \([^)]*\)/, '');
+      badgeText = `${a.streak} ${t("dash.streakShort")} ${shortName}`;
+    }
   }
+  
   return `
     <div class="list-row" style="align-items:flex-start;">
       <div style="flex:1;">
