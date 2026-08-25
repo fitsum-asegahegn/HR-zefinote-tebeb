@@ -164,6 +164,22 @@ function addMonths(d, n) { const nd = new Date(d); nd.setMonth(nd.getMonth() + n
 function todayISO() { return isoDate(new Date()); }
 function fmtDT(iso) { const d = new Date(iso); return d.toLocaleString(getLang() === "en" ? "en-GB" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
+// ---------- Ethiopian time conversion (for Settings UI) ----------
+function gregorianToEthiopianTime(gregorianStr) {
+  if (!gregorianStr) return "";
+  const [h, m] = gregorianStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return gregorianStr;
+  const ethH = (h + 6) % 24;
+  return `${String(ethH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+function ethiopianToGregorianTime(ethiopianStr) {
+  if (!ethiopianStr) return "";
+  const [h, m] = ethiopianStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return ethiopianStr;
+  const gregH = (h - 6 + 24) % 24;
+  return `${String(gregH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 // ---------- Members ----------
 async function importMembersFromWorkbook(file) {
   const data = await file.arrayBuffer();
@@ -957,6 +973,15 @@ async function renderSettings() {
   const programs = await getAll("programs");
   const session = await getSession();
   const cfg = getSupabaseConfig();
+  
+  // Helper to format time for display based on language
+  function displayTime(gregTime) {
+    if (getLang() === 'am' && gregTime) {
+      return gregorianToEthiopianTime(gregTime);
+    }
+    return gregTime || '';
+  }
+
   el("view").innerHTML = `
     <h3 class="section-title">${t("settings.languageTitle")}</h3>
     <div class="toolbar">
@@ -967,7 +992,7 @@ async function renderSettings() {
     <h3 class="section-title">${t("settings.generalTitle")}</h3>
     <div class="form-grid">
       <label>${t("settings.defaultStart")}</label>
-      <input id="s_startTime" class="text-input" value="${settings.defaultStartTime}"/>
+      <input id="s_startTime" class="text-input" placeholder="${getLang() === 'am' ? 'ለምሳሌ ምሽቱ 8:00 ለማስቀመጥ 2:00 ይጻፉ' : 'e.g. 20:00'}" value="${displayTime(settings.defaultStartTime)}"/>
       <label>${t("settings.grace")}</label>
       <input id="s_grace" type="number" class="text-input" value="${settings.graceMinutes}"/>
       <label>${t("settings.confessionInterval")}</label>
@@ -985,8 +1010,8 @@ async function renderSettings() {
         <div class="list-row">
           <div><b>${p.name}</b></div>
           <div class="row-actions">
-            <input class="text-input small" placeholder="HH:MM" id="pt_${p.key}" value="${p.startTime || ""}"/>
-            <input class="text-input small" placeholder="min" id="pg_${p.key}" value="${p.graceMinutes || ""}"/>
+            <input class="text-input small" placeholder="${getLang() === 'am' ? 'ሰዓት' : 'HH:MM'}" id="pt_${p.key}" value="${displayTime(p.startTime)}"/>
+            <input class="text-input small" placeholder="min" id="pg_${p.key}" value="${p.graceMinutes || ''}"/>
           </div>
         </div>`).join("")}
     </div>
@@ -1032,10 +1057,13 @@ async function renderSettings() {
       <button id="exportExcelBtn" class="btn-secondary">${t("settings.exportExcel")}</button>
     </div>
   `;
+
   el("langAm").onclick = () => { setLang("am"); applyStaticI18n(); renderSettings(); };
   el("langEn").onclick = () => { setLang("en"); applyStaticI18n(); renderSettings(); };
   el("saveSettings").onclick = async () => {
-    await setSetting("defaultStartTime", el("s_startTime").value || "10:00");
+    let startTime = el("s_startTime").value || "10:00";
+    if (getLang() === "am" && startTime) startTime = ethiopianToGregorianTime(startTime);
+    await setSetting("defaultStartTime", startTime);
     await setSetting("graceMinutes", Number(el("s_grace").value) || 0);
     await setSetting("confessionIntervalMonths", Number(el("s_conf").value) || 12);
     await setSetting("absenceThreshold", Number(el("s_abs").value) || 3);
@@ -1043,7 +1071,13 @@ async function renderSettings() {
     alert(t("settings.saved"));
   };
   el("saveProgs").onclick = async () => {
-    for (const p of programs) { p.startTime = el("pt_" + p.key).value || ""; p.graceMinutes = el("pg_" + p.key).value || ""; await put("programs", p); }
+    for (const p of programs) {
+      let startTime = el("pt_" + p.key).value || "";
+      if (getLang() === "am" && startTime) startTime = ethiopianToGregorianTime(startTime);
+      p.startTime = startTime;
+      p.graceMinutes = el("pg_" + p.key).value || "";
+      await put("programs", p);
+    }
     alert(t("settings.saved"));
   };
   if (el("connectBtn")) el("connectBtn").onclick = () => { saveSupabaseConfig(el("cl_url").value.trim(), el("cl_key").value.trim()); setSkipCloud(false); boot(); };
@@ -1271,9 +1305,7 @@ function drawCharts(attendance, progs, gradeStats) {
   function formatDateLabel(dateStr) {
     const d = new Date(dateStr + 'T00:00:00');
     if (getLang() === 'am') {
-      // Convert to Ethiopian calendar
       const eth = gregorianToEthiopian(d);
-      // ETH_MONTH_NAMES_AM comes from ethiopian-calendar.js
       return `${eth.day} ${ETH_MONTH_NAMES_AM[eth.month]}`;
     } else {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -1283,7 +1315,6 @@ function drawCharts(attendance, progs, gradeStats) {
   // ---- Attendance trend (with pan + zoom) ----
   const trendCanvas = el("trendChart");
   if (trendCanvas) {
-    // Remove any previous scroll wrapper if it exists
     const parent = trendCanvas.parentElement;
     if (parent && parent.classList.contains('chart-scroll-wrap')) {
       parent.replaceWith(trendCanvas);
@@ -1346,7 +1377,6 @@ function drawCharts(attendance, progs, gradeStats) {
       });
       chartInstances.push(chart);
     } else {
-      // fallback to custom renderer
       FinoteCharts.drawLineChart(trendCanvas, labels, data, { noDataText: t('charts.noData') });
     }
   }
@@ -1383,7 +1413,6 @@ function drawCharts(attendance, progs, gradeStats) {
         }
       }));
     } else {
-      // fallback
       FinoteCharts.drawBarChart(progCanvas, labels,
         [{ label: t('scan.onTime'), values: onTime, color: '#4caf7d' },
          { label: t('scan.late'), values: late, color: '#e0605a' }],
@@ -1428,7 +1457,6 @@ function drawCharts(attendance, progs, gradeStats) {
         }
       }));
     } else {
-      // fallback
       if (gradeStats && gradeStats.rows.length) {
         const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
         const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
