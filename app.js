@@ -367,7 +367,7 @@ async function computeConsecutiveAbsences() {
   return results;
 }
 
-// NEW: Program‑specific absence tracking
+// Program‑specific absence tracking
 async function computeProgramSpecificAbsences(programKey) {
   const members = (await getAll("members")).filter((m) => m.active !== false);
   const attendance = await getAll("attendance");
@@ -445,7 +445,7 @@ function buildGradeNarrative(rows, lang) {
   return lines;
 }
 
-// ---------- JSON export/import (works with or without Supabase) ----------
+// ---------- JSON export/import ----------
 async function exportScansJSON() {
   const attendance = await getAll("attendance");
   const members = await getAll("members");
@@ -512,12 +512,10 @@ function absenteeRow(a) {
     : t("dash.noPhone");
   const log = m.callLog;
   
-  // Short badge text
   let badgeText = t("dash.streakBadge", { n: a.streak });
   if (a.programKey) {
     const prog = PROGRAM_DEFS().find(p => p.key === a.programKey);
     if (prog) {
-      // Remove parentheses and content inside them to get short name
       const shortName = prog.name.replace(/ \([^)]*\)/, '');
       badgeText = `${a.streak} ${t("dash.streakShort")} ${shortName}`;
     }
@@ -571,15 +569,31 @@ window.uncallMember = async (memberId) => {
 };
 
 async function renderDashboard() {
-  // Get filter value from session storage or default to "all"
-  const currentFilter = window._absenceFilter || "all";
-  // Compute absences based on filter
+  const currentFilter = window._absenceFilter || "allCalendar";
   let absentees;
-  if (currentFilter === "all") {
+  
+  if (currentFilter === "allCalendar") {
+    // Original calendar-day logic (total disengagement)
     absentees = await computeConsecutiveAbsences();
+  } else if (currentFilter === "allPrograms") {
+    // UNION of all program-specific absences
+    const progKeys = ["timhert", "mezmur", "tselot"];
+    const allResults = [];
+    for (const key of progKeys) {
+      const results = await computeProgramSpecificAbsences(key);
+      allResults.push(...results);
+    }
+    const seen = new Set();
+    absentees = allResults.filter(a => {
+      if (seen.has(a.member.id)) return false;
+      seen.add(a.member.id);
+      return true;
+    });
   } else {
+    // Specific program
     absentees = await computeProgramSpecificAbsences(currentFilter);
   }
+  
   const [confessionDue, hrDue, settings] = await Promise.all([computeConfessionDue(), computePlanReminders(), getSettings()]);
   const members = await getAll("members");
   const attendance = await getAll("attendance");
@@ -587,9 +601,9 @@ async function renderDashboard() {
   const todayCount = attendance.filter((a) => a.sessionDate === today).length;
   const thr = settings.absenceThreshold || 3;
 
-  // Build filter dropdown
   const filterOptions = [
-    { value: "all", label: t("dash.filterAll") },
+    { value: "allCalendar", label: t("dash.filterAllCalendar") },
+    { value: "allPrograms", label: t("dash.filterAllPrograms") },
     { value: "timhert", label: t("dash.filterCourse") },
     { value: "mezmur", label: t("dash.filterMezmur") },
     { value: "tselot", label: t("dash.filterTselot") },
@@ -603,12 +617,19 @@ async function renderDashboard() {
     </div>
   `;
 
+  let statLabel;
+  if (currentFilter === "allCalendar") {
+    statLabel = t("dash.consecutiveAbsent", { n: thr });
+  } else {
+    statLabel = t("dash.filteredAbsent");
+  }
+
   el("view").innerHTML = `
     <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;margin-top:0;">📅 ${ethLabel(today)}</p>
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-num">${members.length}</div><div class="stat-label">${t("dash.totalMembers")}</div></div>
       <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">${t("dash.todayAttendance")}</div></div>
-      <div class="stat-card"><div class="stat-num">${absentees.length}</div><div class="stat-label">${currentFilter === 'all' ? t("dash.consecutiveAbsent", { n: thr }) : t("dash.filteredAbsent")}</div></div>
+      <div class="stat-card"><div class="stat-num">${absentees.length}</div><div class="stat-label">${statLabel}</div></div>
       <div class="stat-card"><div class="stat-num">${confessionDue.length}</div><div class="stat-label">${t("dash.confessionDueStat")}</div></div>
     </div>
 
@@ -635,7 +656,6 @@ async function renderDashboard() {
     <p class="muted" style="margin-top:6px;"><a href="#" onclick="setTab('plan');return false;" style="color:var(--amber);">${t("dash.viewFullPlan")}</a></p>
   `;
 
-  // Attach change event to the filter dropdown
   const filterEl = el("absenceFilter");
   if (filterEl) {
     filterEl.onchange = (e) => {
@@ -651,7 +671,7 @@ window.doneHrEvent = async (id) => {
   renderDashboard();
 };
 
-// ---------- Scan (batch queue: scan several, review, then confirm all at once) ----------
+// ---------- Scan ----------
 async function renderScan() {
   const members = await getAll("members");
   const progs = PROGRAM_DEFS();
@@ -1367,7 +1387,6 @@ function destroyCharts() {
   chartInstances = [];
 }
 
-// ---------- Updated drawCharts using Chart.js + Ethiopian calendar for Amharic ----------
 function drawCharts(attendance, progs, gradeStats) {
   destroyCharts();
 
@@ -1381,7 +1400,7 @@ function drawCharts(attendance, progs, gradeStats) {
     }
   }
 
-  // ---- Attendance trend (with pan + zoom) ----
+  // ---- Attendance trend ----
   const trendCanvas = el("trendChart");
   if (trendCanvas) {
     const parent = trendCanvas.parentElement;
@@ -1450,7 +1469,7 @@ function drawCharts(attendance, progs, gradeStats) {
     }
   }
 
-  // ---- By program (stacked bar) ----
+  // ---- By program ----
   const progCanvas = el("progChart");
   if (progCanvas) {
     const onTime = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "on-time").length);
@@ -1490,7 +1509,7 @@ function drawCharts(attendance, progs, gradeStats) {
     }
   }
 
-  // ---- By grade (percentage bar) ----
+  // ---- By grade ----
   const gradeCanvas = el("gradeChart");
   if (gradeCanvas) {
     if (gradeStats && gradeStats.rows.length && typeof Chart !== 'undefined') {
