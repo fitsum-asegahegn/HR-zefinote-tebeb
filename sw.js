@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v15";
+const CACHE = "finote-attendance-v16";
 
 const APP_SHELL = [
   "./",
@@ -18,7 +18,8 @@ const RUNTIME_LIBS = [
   "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
   "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
-  
+  "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js",
   "https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js",
   "https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js",
 ];
@@ -27,7 +28,7 @@ self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(CACHE).then((cache) =>
       cache.addAll(APP_SHELL).then(() =>
-        Promise.allSettled(RUNTIME_LIBS.map((u) => cache.add(u)))
+        Promise.all(RUNTIME_LIBS.map((u) => cache.add(u)))
       )
     )
   );
