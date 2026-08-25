@@ -164,19 +164,17 @@ function addMonths(d, n) { const nd = new Date(d); nd.setMonth(nd.getMonth() + n
 function todayISO() { return isoDate(new Date()); }
 function fmtDT(iso) { const d = new Date(iso); return d.toLocaleString(getLang() === "en" ? "en-GB" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
-// ---------- Ethiopian time conversion (for Settings UI) ----------
+// Gregorian → Ethiopian: subtract 6 hours
+// 4 PM (16:00) → Ethiopian 10:00
 function gregorianToEthiopianTime(gregorianStr) {
-  if (!gregorianStr) return "";
-  const [h, m] = gregorianStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return gregorianStr;
-  const ethH = (h + 6) % 24;
+  const ethH = (h - 6 + 24) % 24;
   return `${String(ethH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
+// Ethiopian → Gregorian: add 6 hours
+// Ethiopian 10:00 → Gregorian 16:00 (4 PM)
 function ethiopianToGregorianTime(ethiopianStr) {
-  if (!ethiopianStr) return "";
-  const [h, m] = ethiopianStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return ethiopianStr;
-  const gregH = (h - 6 + 24) % 24;
+  const gregH = (h + 6) % 24;
   return `${String(gregH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
