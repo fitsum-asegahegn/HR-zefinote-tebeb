@@ -249,7 +249,7 @@ const I18N = {
     "dash.confessionDueStat": "Confession due",
     "dash.callListTitle": "🔔 Members to call ({n}+ sessions absent in a row)",
     "dash.filterAll": "All",
-    "dash.filteredAbsent": "ተከታታይ ቀሪ (በምርጫ)",
+    "dash.filteredAbsent": "Consecutive absences (filtered)",
     "dash.filterAllCalendar": "All (Calendar days)",
     "dash.filterAllPrograms": "All (By program)",
     "dash.filterCourse": "Course",
