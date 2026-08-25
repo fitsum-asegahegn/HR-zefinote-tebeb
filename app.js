@@ -89,10 +89,6 @@ async function ensurePrograms() {
   }
 }
 // ---------- Plan (seeded exactly from የሰው ሀብት ክፍል ዕቅድ.docx) ----------
-// timing text is kept verbatim for display; recurrenceDays is a practical
-// heuristic for the dashboard due-date badge (Ethiopian-calendar month
-// names aren't converted to exact Gregorian dates — HR can always adjust
-// the cadence per item, or just use ተከናውኗል/mark-done manually).
 const DEFAULT_PLAN_MAIN = [
   { no: 1, subUnit: "የአባላት አስተዳደር", title: "አዳዲስ አባላትን መመልመልና ማቀላቀል (ዲጂታል ዘመቻን ጨምሮ)", details: "ኦሪየንቴሽን ማዘጋጀት፤ በቴሌግራም/ማህበራዊ ሚዲያ/ድረ-ገጽ አዲስ አባላትን መሳብ፤ የአባላት መሠረታዊ መረጃ መሰብሰብ", outcome: "የአባላት ቁጥር እድገትና ተጨማሪ የሰው ኃይል", indicator: "የተመዘገቡ አዳዲስ አባላት ብዛት", metricTarget: "በቁጥር (ዒላማ ተቀምጦ)", timing: "መስከረም–ጥቅምት", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
   { no: 2, subUnit: "የአባላት አስተዳደር", title: "የሰው ኃይል ድልድል ማዘጋጀት", details: "የተቀበሉ አባላትን ችሎታና ዝንባሌ መሠረት ያደረገ የአገልግሎት ምደባ ማዘጋጀት", outcome: "ትክክለኛና ውጤታማ ምደባ", indicator: "የተመደቡ አባላት ብዛት", metricTarget: "100%", timing: "ጥቅምት", executor: "የአባላት አስተዳደር ንዑስ ክፍል", budget: "-", recurrenceDays: 365 },
@@ -140,7 +136,7 @@ function guessRecurrenceDays(timingText) {
   if (/ሩብ ዓመት|quarterly/i.test(s)) return 91;
   if (/2 ጊዜ|twice/i.test(s)) return 182;
   if (/እንደአስፈላጊነቱ|እንደአጋጣሚው|as needed|as-needed/i.test(s)) return 0;
-  return 365; // default: treat as an annual/seasonal item
+  return 365;
 }
 
 async function computePlanReminders() {
@@ -1149,192 +1145,6 @@ async function unlockWithBiometric() {
   }
 }
 
-// ---------- Reports ----------
-let chartInstances = [];
-function destroyCharts() { chartInstances.forEach((c) => c.destroy()); chartInstances = []; }
-
-// ---------- Updated drawCharts using Chart.js with zoom ----------
-function drawCharts(attendance, progs, gradeStats) {
-  destroyCharts();
-
-  // Helper: format date labels
-  function formatDateLabel(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString(getLang() === 'am' ? 'am-ET' : 'en-US', {
-      month: 'short', day: 'numeric'
-    });
-  }
-
-  // ---- Attendance trend (with pan + zoom) ----
-  const trendCanvas = el("trendChart");
-  if (trendCanvas) {
-    // Remove any previous scroll wrapper if it exists
-    const parent = trendCanvas.parentElement;
-    if (parent && parent.classList.contains('chart-scroll-wrap')) {
-      parent.replaceWith(trendCanvas);
-      trendCanvas.style.minWidth = '';
-    }
-
-    const byDate = {};
-    attendance.forEach(a => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
-    const sortedDates = Object.keys(byDate).sort();
-    const labels = sortedDates.map(d => formatDateLabel(d));
-    const data = sortedDates.map(d => byDate[d]);
-
-    if (typeof Chart !== 'undefined') {
-      const ctx = trendCanvas.getContext('2d');
-      // Register the zoom plugin for this chart
-      const chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: t('charts.attendanceTrend'),
-            data: data,
-            borderColor: '#f2a33c',
-            backgroundColor: 'rgba(242,163,60,0.15)',
-            tension: 0.3,
-            fill: true,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.parsed.y} ${getLang() === 'am' ? 'ቅኝት' : 'scans'}`
-              }
-            },
-            zoom: {
-              pan: {
-                enabled: true,
-                mode: 'x',
-              },
-              zoom: {
-                enabled: true,
-                mode: 'x',
-                drag: false,
-                limits: {
-                  x: { minRange: 2 }
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              ticks: { color: '#9c9187', maxRotation: 45 },
-              grid: { color: 'rgba(255,255,255,0.06)' }
-            },
-            y: {
-              ticks: { color: '#9c9187', beginAtZero: true },
-              grid: { color: 'rgba(255,255,255,0.06)' }
-            }
-          }
-        },
-        plugins: [ChartZoom] // activate the zoom plugin
-      });
-      chartInstances.push(chart);
-    } else {
-      // fallback
-      FinoteCharts.drawLineChart(trendCanvas, labels, data, { noDataText: t('charts.noData') });
-    }
-  }
-
-  // ---- By program (stacked bar) ----
-  const progCanvas = el("progChart");
-  if (progCanvas) {
-    const onTime = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "on-time").length);
-    const late = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "late").length);
-    const labels = progs.map(p => p.name);
-    const total = onTime.reduce((a,b)=>a+b,0) + late.reduce((a,b)=>a+b,0);
-
-    if (total > 0 && typeof Chart !== 'undefined') {
-      const ctx = progCanvas.getContext('2d');
-      chartInstances.push(new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [
-            { label: t('scan.onTime'), data: onTime, backgroundColor: '#4caf7d' },
-            { label: t('scan.late'), data: late, backgroundColor: '#e0605a' }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: { stacked: true, ticks: { color: '#9c9187' } },
-            y: { stacked: true, ticks: { color: '#9c9187' }, beginAtZero: true }
-          },
-          plugins: {
-            legend: { labels: { color: '#f2ede6' } }
-          }
-        }
-      }));
-    } else {
-      // fallback
-      FinoteCharts.drawBarChart(progCanvas, labels,
-        [{ label: t('scan.onTime'), values: onTime, color: '#4caf7d' },
-         { label: t('scan.late'), values: late, color: '#e0605a' }],
-        { stacked: true, noDataText: t('charts.noData') }
-      );
-    }
-  }
-
-  // ---- By grade (percentage bar) ----
-  const gradeCanvas = el("gradeChart");
-  if (gradeCanvas) {
-    if (gradeStats && gradeStats.rows.length && typeof Chart !== 'undefined') {
-      const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
-      const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
-      const values = rowsAsc.map(r => Math.round(r.rate * 100));
-      const ctx = gradeCanvas.getContext('2d');
-      chartInstances.push(new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: t('charts.byGrade'),
-            data: values,
-            backgroundColor: '#f2a33c'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.parsed.y}%`
-              }
-            }
-          },
-          scales: {
-            x: { ticks: { color: '#9c9187' } },
-            y: { ticks: { color: '#9c9187', callback: (v) => v + '%' }, beginAtZero: true, max: 100 }
-          }
-        }
-      }));
-    } else {
-      // fallback
-      if (gradeStats && gradeStats.rows.length) {
-        const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
-        const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
-        const values = rowsAsc.map(r => Math.round(r.rate * 100));
-        FinoteCharts.drawBarChart(gradeCanvas, labels,
-          [{ label: t('charts.byGrade'), values: values, color: '#f2a33c' }],
-          { percent: true, noDataText: t('charts.noData') }
-        );
-      } else {
-        FinoteCharts.drawBarChart(gradeCanvas, [], [], { noDataText: t('charts.noData') });
-      }
-    }
-  }
-}
-
 // ---------- Registration Modal ----------
 window.openRegistrationModal = async function(editId) {
   const member = editId ? await get("members", editId) : null;
@@ -1448,6 +1258,192 @@ window.openRegistrationModal = async function(editId) {
 };
 
 // ---------- Reports ----------
+let chartInstances = [];
+function destroyCharts() {
+  chartInstances.forEach((c) => { try { c.destroy(); } catch (e) {} });
+  chartInstances = [];
+}
+
+// ---------- Updated drawCharts using Chart.js + Ethiopian calendar for Amharic ----------
+function drawCharts(attendance, progs, gradeStats) {
+  destroyCharts();
+
+  function formatDateLabel(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    if (getLang() === 'am') {
+      // Convert to Ethiopian calendar
+      const eth = gregorianToEthiopian(d);
+      // ETH_MONTH_NAMES_AM comes from ethiopian-calendar.js
+      return `${eth.day} ${ETH_MONTH_NAMES_AM[eth.month]}`;
+    } else {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  }
+
+  // ---- Attendance trend (with pan + zoom) ----
+  const trendCanvas = el("trendChart");
+  if (trendCanvas) {
+    // Remove any previous scroll wrapper if it exists
+    const parent = trendCanvas.parentElement;
+    if (parent && parent.classList.contains('chart-scroll-wrap')) {
+      parent.replaceWith(trendCanvas);
+      trendCanvas.style.minWidth = '';
+    }
+
+    const byDate = {};
+    attendance.forEach(a => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
+    const sortedDates = Object.keys(byDate).sort();
+    const labels = sortedDates.map(d => formatDateLabel(d));
+    const data = sortedDates.map(d => byDate[d]);
+
+    if (typeof Chart !== 'undefined') {
+      const ctx = trendCanvas.getContext('2d');
+      const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: t('charts.attendanceTrend'),
+            data: data,
+            borderColor: '#f2a33c',
+            backgroundColor: 'rgba(242,163,60,0.15)',
+            tension: 0.3,
+            fill: true,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.parsed.y} ${getLang() === 'am' ? 'ቅኝት' : 'scans'}`
+              }
+            },
+            zoom: {
+              pan: { enabled: true, mode: 'x' },
+              zoom: {
+                enabled: true,
+                mode: 'x',
+                drag: false,
+                limits: { x: { minRange: 2 } }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#9c9187', maxRotation: 45 },
+              grid: { color: 'rgba(255,255,255,0.06)' }
+            },
+            y: {
+              ticks: { color: '#9c9187', beginAtZero: true },
+              grid: { color: 'rgba(255,255,255,0.06)' }
+            }
+          }
+        },
+        plugins: [ChartZoom]
+      });
+      chartInstances.push(chart);
+    } else {
+      // fallback to custom renderer
+      FinoteCharts.drawLineChart(trendCanvas, labels, data, { noDataText: t('charts.noData') });
+    }
+  }
+
+  // ---- By program (stacked bar) ----
+  const progCanvas = el("progChart");
+  if (progCanvas) {
+    const onTime = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "on-time").length);
+    const late = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "late").length);
+    const labels = progs.map(p => p.name);
+    const total = onTime.reduce((a,b)=>a+b,0) + late.reduce((a,b)=>a+b,0);
+
+    if (total > 0 && typeof Chart !== 'undefined') {
+      const ctx = progCanvas.getContext('2d');
+      chartInstances.push(new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: t('scan.onTime'), data: onTime, backgroundColor: '#4caf7d' },
+            { label: t('scan.late'), data: late, backgroundColor: '#e0605a' }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { stacked: true, ticks: { color: '#9c9187' } },
+            y: { stacked: true, ticks: { color: '#9c9187' }, beginAtZero: true }
+          },
+          plugins: {
+            legend: { labels: { color: '#f2ede6' } }
+          }
+        }
+      }));
+    } else {
+      // fallback
+      FinoteCharts.drawBarChart(progCanvas, labels,
+        [{ label: t('scan.onTime'), values: onTime, color: '#4caf7d' },
+         { label: t('scan.late'), values: late, color: '#e0605a' }],
+        { stacked: true, noDataText: t('charts.noData') }
+      );
+    }
+  }
+
+  // ---- By grade (percentage bar) ----
+  const gradeCanvas = el("gradeChart");
+  if (gradeCanvas) {
+    if (gradeStats && gradeStats.rows.length && typeof Chart !== 'undefined') {
+      const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
+      const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
+      const values = rowsAsc.map(r => Math.round(r.rate * 100));
+      const ctx = gradeCanvas.getContext('2d');
+      chartInstances.push(new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: t('charts.byGrade'),
+            data: values,
+            backgroundColor: '#f2a33c'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.parsed.y}%`
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { color: '#9c9187' } },
+            y: { ticks: { color: '#9c9187', callback: (v) => v + '%' }, beginAtZero: true, max: 100 }
+          }
+        }
+      }));
+    } else {
+      // fallback
+      if (gradeStats && gradeStats.rows.length) {
+        const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
+        const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
+        const values = rowsAsc.map(r => Math.round(r.rate * 100));
+        FinoteCharts.drawBarChart(gradeCanvas, labels,
+          [{ label: t('charts.byGrade'), values: values, color: '#f2a33c' }],
+          { percent: true, noDataText: t('charts.noData') }
+        );
+      } else {
+        FinoteCharts.drawBarChart(gradeCanvas, [], [], { noDataText: t('charts.noData') });
+      }
+    }
+  }
+}
+
 async function renderReports() {
   const attendance = (await getAll("attendance")).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const members = await getAll("members");
@@ -1929,8 +1925,3 @@ async function init() {
   boot();
 }
 document.addEventListener("DOMContentLoaded", init);
-
-// ---------- charts.js (fallback) ----------
-// The custom renderer is kept as a fallback; it's defined at the bottom
-// of the original app.js. To save space, we assume it's already there.
-// If not, you can copy it from the earlier version.
