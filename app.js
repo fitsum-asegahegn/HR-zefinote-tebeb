@@ -1,3 +1,11 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>app</title>
+</head>
+<body>
 /* ፍኖተ ጥበብ — ዲጂታል መገኘት (Digital Attendance PWA)
    Offline-first via IndexedDB. Supabase is optional for multi-device sync + auth. */
 
@@ -1078,6 +1086,57 @@ async function unlockWithBiometric() {
 let chartInstances = [];
 function destroyCharts() { chartInstances.forEach((c) => c.destroy()); chartInstances = []; }
 
+// ---------- Updated drawCharts using built-in renderer ----------
+function drawCharts(attendance, progs, gradeStats) {
+  destroyCharts();
+
+  // ---------- Trend chart (line) ----------
+  const trendCanvas = el("trendChart");
+  if (trendCanvas) {
+    const byDate = {};
+    attendance.forEach(a => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
+    const dates = Object.keys(byDate).sort().slice(-12);
+    if (dates.length) {
+      const values = dates.map(d => byDate[d]);
+      FinoteCharts.drawLineChart(trendCanvas, dates, values, { noDataText: t("charts.noData") });
+    } else {
+      FinoteCharts.drawLineChart(trendCanvas, [], [], { noDataText: t("charts.noData") });
+    }
+  }
+
+  // ---------- Program chart (stacked bar) ----------
+  const progCanvas = el("progChart");
+  if (progCanvas) {
+    const onTime = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "on-time").length);
+    const late = progs.map(p => attendance.filter(a => a.programKey === p.key && a.status === "late").length);
+    const labels = progs.map(p => p.name);
+    const datasets = [
+      { label: t("scan.onTime"), values: onTime, color: "#4caf7d" },
+      { label: t("scan.late"), values: late, color: "#e0605a" }
+    ];
+    const total = onTime.reduce((a,b)=>a+b,0) + late.reduce((a,b)=>a+b,0);
+    if (total > 0) {
+      FinoteCharts.drawBarChart(progCanvas, labels, datasets, { stacked: true, noDataText: t("charts.noData") });
+    } else {
+      FinoteCharts.drawBarChart(progCanvas, [], [], { noDataText: t("charts.noData") });
+    }
+  }
+
+  // ---------- Grade chart (percentage bar) ----------
+  const gradeCanvas = el("gradeChart");
+  if (gradeCanvas) {
+    if (gradeStats && gradeStats.rows.length) {
+      const rowsAsc = [...gradeStats.rows].sort((a,b) => a.grade - b.grade);
+      const labels = rowsAsc.map(r => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade);
+      const values = rowsAsc.map(r => Math.round(r.rate * 100));
+      const datasets = [{ label: t("charts.byGrade"), values: values, color: "#f2a33c" }];
+      FinoteCharts.drawBarChart(gradeCanvas, labels, datasets, { percent: true, noDataText: t("charts.noData") });
+    } else {
+      FinoteCharts.drawBarChart(gradeCanvas, [], [], { noDataText: t("charts.noData") });
+    }
+  }
+}
+
 async function renderReports() {
   const attendance = (await getAll("attendance")).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const members = await getAll("members");
@@ -1111,89 +1170,6 @@ async function renderReports() {
   `;
   el("repExcel").onclick = exportAttendanceExcel;
   drawCharts(attendance, progs, gradeStats);
-}
-
-function drawCharts(attendance, progs, gradeStats) {
-  destroyCharts();
-  if (typeof Chart === "undefined") {
-    // Chart.js didn't load — most often a stale cached app shell (see
-    // README: bump sw.js's CACHE version and force-reload) or no signal
-    // the very first time the app opens. Surface it instead of leaving
-    // silent blank boxes, since that's impossible to tell apart from
-    // "not enough data" otherwise.
-    ["trendChart", "progChart", "gradeChart"].forEach((id) => {
-      const c = el(id);
-      if (c) c.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.libFailed") }));
-    });
-    return;
-  }
-
-  // Attendance trend: total scans per session date, last 12 dates
-  const byDate = {};
-  attendance.forEach((a) => { byDate[a.sessionDate] = (byDate[a.sessionDate] || 0) + 1; });
-  const dates = Object.keys(byDate).sort().slice(-12);
-  const trendCanvas = el("trendChart");
-  if (dates.length && trendCanvas) {
-    try {
-      chartInstances.push(new Chart(trendCanvas, {
-        type: "line",
-        data: { labels: dates, datasets: [{ label: t("charts.attendanceTrend"), data: dates.map((d) => byDate[d]), borderColor: "#f2a33c", backgroundColor: "rgba(242,163,60,0.15)", tension: 0.3, fill: true }] },
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187" }, beginAtZero: true } } },
-      }));
-    } catch (err) {
-      trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
-    }
-  } else if (trendCanvas) {
-    trendCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
-  }
-
-  // By program: total scans per program, on-time vs late
-  const progCanvas = el("progChart");
-  if (attendance.length && progCanvas) {
-    try {
-      const onTime = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "on-time").length);
-      const late = progs.map((p) => attendance.filter((a) => a.programKey === p.key && a.status === "late").length);
-      chartInstances.push(new Chart(progCanvas, {
-        type: "bar",
-        data: {
-          labels: progs.map((p) => p.name),
-          datasets: [
-            { label: t("scan.onTime"), data: onTime, backgroundColor: "#4caf7d" },
-            { label: t("scan.late"), data: late, backgroundColor: "#e0605a" },
-          ],
-        },
-        options: { maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: "#9c9187" } }, y: { stacked: true, ticks: { color: "#9c9187" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#f2ede6" } } } },
-      }));
-    } catch (err) {
-      progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
-    }
-  } else if (progCanvas) {
-    progCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
-  }
-
-  // By grade (1-12): attendance rate = scans / (members in grade × sessions), makes uneven class sizes comparable
-  const gradeCanvas = el("gradeChart");
-  if (gradeStats && gradeStats.rows.length && gradeCanvas) {
-    try {
-      const rowsAsc = [...gradeStats.rows].sort((a, b) => a.grade - b.grade);
-      chartInstances.push(new Chart(gradeCanvas, {
-        type: "bar",
-        data: {
-          labels: rowsAsc.map((r) => (getLang() === "am" ? "ክፍል " : "Grade ") + r.grade),
-          datasets: [{ label: t("charts.byGrade"), data: rowsAsc.map((r) => Math.round(r.rate * 100)), backgroundColor: "#f2a33c" }],
-        },
-        options: {
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.y + "%" } } },
-          scales: { x: { ticks: { color: "#9c9187" } }, y: { ticks: { color: "#9c9187", callback: (v) => v + "%" }, beginAtZero: true } },
-        },
-      }));
-    } catch (err) {
-      gradeCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.renderError") + ": " + err.message }));
-    }
-  } else if (gradeCanvas) {
-    gradeCanvas.replaceWith(Object.assign(document.createElement("p"), { className: "muted", textContent: t("charts.noData") }));
-  }
 }
 
 // ---------- Plan (ዕቅድ) tab: Excel import/export + completion tracking ----------
@@ -1644,3 +1620,186 @@ async function init() {
   boot();
 }
 document.addEventListener("DOMContentLoaded", init);
+
+// ---------- charts.js ----------
+// Minimal, dependency‑free canvas chart rendering. No CDN library —
+// these chart types (line, stacked bar, percent bar) are drawn directly,
+// so the Reports tab can never break because an external script failed to load.
+
+function fcSetupCanvas(canvas) {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height));
+  canvas.width = Math.max(1, Math.floor(w * dpr));
+  canvas.height = Math.max(1, Math.floor(h * dpr));
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, width: w, height: h };
+}
+
+function fcNiceMax(v) {
+  if (v <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const norm = v / mag;
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return step * mag;
+}
+
+function fcDrawAxes(ctx, w, h, pad, maxVal, opts) {
+  ctx.strokeStyle = "#332c26";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top);
+  ctx.lineTo(pad.left, h - pad.bottom);
+  ctx.lineTo(w - pad.right, h - pad.bottom);
+  ctx.stroke();
+  ctx.font = "10px JetBrains Mono, monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  const steps = 4;
+  for (let i = 0; i <= steps; i++) {
+    const v = (maxVal / steps) * i;
+    const y = h - pad.bottom - (h - pad.top - pad.bottom) * (maxVal ? v / maxVal : 0);
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+    ctx.fillStyle = "#9c9187";
+    ctx.fillText((opts && opts.percent ? Math.round(v) + "%" : String(Math.round(v))), pad.left - 6, y);
+  }
+}
+
+function fcDrawXLabels(ctx, labels, pad, w, h) {
+  ctx.fillStyle = "#9c9187";
+  ctx.font = "10px JetBrains Mono, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const innerW = w - pad.left - pad.right;
+  const n = labels.length || 1;
+  labels.forEach((label, i) => {
+    const x = pad.left + (innerW * (i + 0.5)) / n;
+    ctx.fillText(String(label), x, h - pad.bottom + 6);
+  });
+}
+
+function fcNoData(canvas, text) {
+  const { ctx, width: w, height: h } = fcSetupCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#9c9187";
+  ctx.font = "13px 'Noto Sans Ethiopic', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  wrapText(ctx, text, 8, 8, w - 16, 16);
+}
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "", cy = y;
+  for (const word of words) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      ctx.fillText(line, x, cy);
+      line = word;
+      cy += lineHeight;
+    } else {
+      line = test;
+    }
+  }
+  if (line) ctx.fillText(line, x, cy);
+}
+
+function fcDrawLineChart(canvas, labels, values, opts = {}) {
+  const { ctx, width: w, height: h } = fcSetupCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  if (!values.length) return fcNoData(canvas, opts.noDataText || "");
+  const pad = { left: 34, right: 10, top: 10, bottom: 22 };
+  const maxVal = fcNiceMax(Math.max(...values, 1));
+  fcDrawAxes(ctx, w, h, pad, maxVal);
+  fcDrawXLabels(ctx, labels, pad, w, h);
+  const innerW = w - pad.left - pad.right;
+  const innerH = h - pad.top - pad.bottom;
+  const n = values.length;
+  const pts = values.map((v, i) => ({
+    x: pad.left + (innerW * (i + 0.5)) / n,
+    y: h - pad.bottom - innerH * (maxVal ? v / maxVal : 0),
+  }));
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, h - pad.bottom);
+  pts.forEach((p) => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(pts[pts.length - 1].x, h - pad.bottom);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(242,163,60,0.15)";
+  ctx.fill();
+  ctx.beginPath();
+  pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  ctx.strokeStyle = "#f2a33c";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = "#f2a33c";
+  pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
+}
+
+function fcDrawBarChart(canvas, labels, datasets, opts = {}) {
+  const { ctx, width: w, height: h } = fcSetupCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  if (!labels.length || !datasets.length) return fcNoData(canvas, opts.noDataText || "");
+  const pad = { left: 34, right: 10, top: opts.legend ? 22 : 10, bottom: 22 };
+  const n = labels.length;
+  let maxVal;
+  if (opts.percent) {
+    maxVal = 100;
+  } else if (opts.stacked) {
+    const totals = labels.map((_, i) => datasets.reduce((s, d) => s + (d.values[i] || 0), 0));
+    maxVal = fcNiceMax(Math.max(...totals, 1));
+  } else {
+    maxVal = fcNiceMax(Math.max(...datasets.flatMap((d) => d.values), 1));
+  }
+  fcDrawAxes(ctx, w, h, pad, maxVal, opts);
+  fcDrawXLabels(ctx, labels, pad, w, h);
+  const innerW = w - pad.left - pad.right;
+  const innerH = h - pad.top - pad.bottom;
+  const groupW = innerW / n;
+  const dsCount = datasets.length;
+  const barGap = 3;
+  const barW = opts.stacked ? groupW * 0.55 : (groupW * 0.72) / dsCount;
+
+  labels.forEach((_, i) => {
+    let stackedY = h - pad.bottom;
+    datasets.forEach((ds, di) => {
+      const v = ds.values[i] || 0;
+      const barH = innerH * (maxVal ? v / maxVal : 0);
+      let x;
+      if (opts.stacked) {
+        x = pad.left + groupW * i + (groupW - barW) / 2;
+      } else {
+        const totalW = dsCount * barW + (dsCount - 1) * barGap;
+        x = pad.left + groupW * i + (groupW - totalW) / 2 + di * (barW + barGap);
+      }
+      const y = opts.stacked ? stackedY - barH : h - pad.bottom - barH;
+      ctx.fillStyle = ds.color;
+      ctx.fillRect(x, y, Math.max(1, barW), Math.max(0, barH));
+      if (opts.stacked) stackedY -= barH;
+    });
+  });
+
+  if (opts.legend) {
+    let lx = pad.left;
+    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    datasets.forEach((ds) => {
+      ctx.fillStyle = ds.color;
+      ctx.fillRect(lx, 4, 10, 10);
+      ctx.fillStyle = "#f2ede6";
+      ctx.fillText(ds.label, lx + 14, 9);
+      lx += 14 + ctx.measureText(ds.label).width + 16;
+    });
+  }
+}
+
+window.FinoteCharts = { drawLineChart: fcDrawLineChart, drawBarChart: fcDrawBarChart };
+</body>
+</html>
