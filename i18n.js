@@ -57,8 +57,8 @@ const I18N = {
     "plan.doneLogTitle": "የተከናወነ ማስታወሻ",
     "plan.nextDue": "ቀጣይ የመድረሻ ቀን",
     "plan.noDoneLog": "ገና አልተከናወነም",
-    "plan.mainSection": "ዋና ዕቅድ (አንቀጽ ፳ መሠረት)",
-    "plan.internalSection": "የክፍል ውስጥ ግንኙነት ዕቅድ",
+    "plan.mainCategory": "ዋና ዕቅድ (አንቀጽ ፳ መሠረት)",
+    "plan.internalCategory": "የክፍል ውስጥ ግንኙነት ዕቅድ",
     "plan.resetToDefault": "ወደ መጀመሪያው ዕቅድ መልስ",
     "plan.resetConfirm": "የአሁኑን ዕቅድ ሁሉ አጥፍቶ ወደ መጀመሪያው (ከ docx የተወሰደው) ዕቅድ ይመለስ?",
 
@@ -289,8 +289,8 @@ const I18N = {
     "plan.doneLogTitle": "Completion log",
     "plan.nextDue": "Next due",
     "plan.noDoneLog": "Not done yet",
-    "plan.mainSection": "Main plan (per Article 20)",
-    "plan.internalSection": "Internal team-cohesion plan",
+    "plan.mainCategory": "Main plan (per Article 20)",
+    "plan.internalCategory": "Internal team-cohesion plan",
     "plan.resetToDefault": "Reset to original plan",
     "plan.resetConfirm": "Erase the current plan and restore the original (from the docx)?",
 
