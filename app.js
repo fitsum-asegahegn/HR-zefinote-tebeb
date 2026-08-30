@@ -106,7 +106,7 @@ async function checkAndNotify() {
 
 // ---------- Constants ----------
 const DB_NAME = "finote_attendance";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // Note: ETH_MONTH_NAMES_AM / ETH_MONTH_NAMES_EN / gregorianToEthiopian() /
 // ethLabel() / computeEthAwareNextDate() come from ethiopian-calendar.js,
@@ -119,6 +119,20 @@ function PROGRAM_DEFS() {
     { key: "tselot", name: getLang() === "am" ? "ጸሎት (Tselot)" : "Tselot (ጸሎት)" },
   ];
 }
+
+// Shared with both the member registration modal (department preferences)
+// and the Groups tab (roster grouped by assigned department).
+const DEPT_OPTIONS = [
+  "ትምህርትና ስልጠና ክፍል",
+  "ዜማና ስነ-ጥበባት ክፍል",
+  "መርኃ ግብርና ጉባኤያት ክፍል",
+  "የሰው ሀብት አስተዳደር ክፍል",
+  "የፋይናንስ እና ንብረት አስተዳደር ክፍል",
+  "እቅድ እና ልማት ክፍል",
+  "መረጃና የውስጥ ግንኙነት ክፍል",
+  "የሕጻናት እና ታዳጊዎች አስተዳደር ክፍል",
+  "ምግባረ ሰናይ ክፍል",
+];
 
 const DEFAULT_SETTINGS = {
   defaultStartTime: "10:00",
@@ -163,6 +177,9 @@ function openDB() {
       if (!d.objectStoreNames.contains("planItems")) {
         const s = d.createObjectStore("planItems", { keyPath: "id" });
         s.createIndex("category", "category", { unique: false });
+      }
+      if (!d.objectStoreNames.contains("families")) {
+        d.createObjectStore("families", { keyPath: "id" });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -228,22 +245,41 @@ function ethiopianToGregorianTime(ethiopianStr) {
   return `${String(gregH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-// ---------- Plan Data (simplified for brevity) ----------
+// ---------- Plan Data ----------
+// recurrenceDays semantics used by the HR report (see computeHrReportData):
+//   30            -> monthly cadence; period target = number of months in the report
+//   >30           -> any other real cadence (quarterly/biannual/annual/one-off); period target is a flat 1
+//   0             -> reactive/ongoing item with no fixed schedule; reported as a raw count, "Manual tracking"
 const DEFAULT_PLAN_MAIN = [
-  { no: 1, subUnit: "የአባላት አስተዳደር", title: "አዳዲስ አባላትን መመልመልና ማቀላቀል", timing: "መስከረም–ጥቅምት", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 365 },
-  { no: 2, subUnit: "የአባላት መረጃ", title: "የተሳትፎ ቁጥጥር", timing: "ወርሃዊ", executor: "የአባላት መረጃ ንዑስ ክፍል", recurrenceDays: 30 },
-  { no: 3, subUnit: "ምክረ አበው", title: "የንስሃና ቁርባን ሕይወት ክትትል", timing: "ወርሃዊ", executor: "ምክረ አበው ንዑስ ክፍል", recurrenceDays: 30 },
+  { no: 1, subUnit: "የአባላት አስተዳደር", title: "አዳዲስ አባላትን መመልመልና ማቀላቀል (ዲጂታል ዘመቻን ጨምሮ)", timing: "መስከረም–ጥቅምት", metricTarget: "በቁጥር (ዒላማ ተቀምጦ)", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 2, subUnit: "የአባላት አስተዳደር", title: "የሰው ኃይል ድልድል ማዘጋጀት", timing: "ዓመታዊ", metricTarget: "100%", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 3, subUnit: "የአባላት አስተዳደር", title: "የአቅም ግንባታ ስልጠና ማዘጋጀትና መስጠት", timing: "ዓመታዊ", metricTarget: "100% አፈጻጸም", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 4, subUnit: "የአባላት አስተዳደር", title: "የአመራር ማፍሪያ ሥርዓት (ንዑ.አን. ፳/3.13, 3.20)", timing: "ዓመታዊ", metricTarget: "በዓመት 1 ዙር", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 5, subUnit: "የአባላት አስተዳደር", title: "አዲስ አባላት አቀባበልና አቅጣጫ ማሳወቅ (ንዑ.አን. ፳/3.19)", timing: "እንደአጋጣሚው", metricTarget: "100%", executor: "የአባላት አስተዳደር ንዑስ ክፍል", recurrenceDays: 0 },
+  { no: 6, subUnit: "የአባላት መረጃ", title: "የአባላት ፎርም ማስሞላትና መረጃ ማደራጀት", timing: "ዓመታዊ", metricTarget: "100%", executor: "የአባላት መረጃ ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 7, subUnit: "የአባላት መረጃ", title: "የተሳትፎ (ስም) ቁጥጥር", timing: "ወርሃዊ", metricTarget: "ወርሃዊ ሪፖርት", executor: "የአባላት መረጃ ንዑስ ክፍል", recurrenceDays: 30 },
+  { no: 8, subUnit: "የአባላት መረጃ", title: "በየሩብ ዓመቱ የጠፉ/የራቁ አባላትን መለየትና መመለስ", timing: "በየሩብ ዓመቱ", metricTarget: "100%", executor: "የአባላት መረጃ ንዑስ ክፍል", recurrenceDays: 90 },
+  { no: 9, subUnit: "ምክረ አበው", title: "የንስሃና ቁርባን ሕይወት ክትትል", timing: "ወርሃዊ", metricTarget: "100%", executor: "ምክረ አበው ንዑስ ክፍል", recurrenceDays: 30 },
+  { no: 10, subUnit: "ምክረ አበው", title: "ሚስጥራዊ የምክር አገልግሎት መስመር (ንዑ.አን. ፳/3.16-3.17)", timing: "እንደአስፈላጊነቱ", metricTarget: "እንደአስፈላጊነቱ", executor: "ምክረ አበው ንዑስ ክፍል", recurrenceDays: 0 },
+  { no: 11, subUnit: "ምክረ አበው", title: "በአባላት መካከል የሚፈጠሩ አለመግባባቶችን መፍታት", timing: "እንደአስፈላጊነቱ", metricTarget: "100% አፈጻጸም", executor: "ምክረ አበው ንዑስ ክፍል", recurrenceDays: 0 },
+  { no: 12, subUnit: "ህጻናትና ታዳጊ ክትትል", title: "ከሕጻናትና ታዳጊ ክፍል (አንቀጽ ፳፭) ጋር ተቀናጅቶ የአባልነት ሽግግር ክትትል", timing: "ዓመታዊ", metricTarget: "100%", executor: "ህጻናትና ታዳጊ ክትትል ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 13, subUnit: "ጽ/ቤት (አጠቃላይ)", title: "የ3 ወር አፈጻጸም ሪፖርትና መለኪያ", timing: "በየሩብ ዓመቱ", metricTarget: "4 ሪፖርቶች", executor: "ጽ/ቤት", recurrenceDays: 90 },
 ];
 
 const DEFAULT_PLAN_INTERNAL = [
-  { no: 1, subUnit: "የክፍል ውስጥ ግንኙነት", title: "ወርሃዊ የክፍል ስብሰባ", timing: "ወርሃዊ", executor: "የክፍሉ ጽ/ቤት", recurrenceDays: 30 },
+  { no: 1, subUnit: "የክፍል ውስጥ ግንኙነት", title: "ወርሃዊ የክፍል ስብሰባና የልምድ ልውውጥ", timing: "ወርሃዊ", metricTarget: "12 ስብሰባ", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 30 },
+  { no: 2, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ አጋፔ / ግንኙነት ቀን", timing: "በዓመት 2 ጊዜ", metricTarget: "በዓመት 2 ጊዜ", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 182 },
+  { no: 3, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ መንፈሳዊ ጉዞ", timing: "በዓመት 1 ጊዜ", metricTarget: "በዓመት 1 ጊዜ", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 4, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የውስጥ እውቅናና ማበረታቻ", timing: "በዓመት 1 ጊዜ", metricTarget: "በዓመት 1 ጊዜ", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 365 },
+  { no: 5, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ ደስታ/ሐዘን መጠያየቅ", timing: "እንደአጋጣሚው", metricTarget: "እንደአጋጣሚው", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 0 },
 ];
 
 async function ensurePlanItems() {
   const existing = await getAll("planItems");
-  if (existing.length) return;
+  const existingKeys = new Set(existing.map((e) => e.category + "|" + e.title));
   const today = new Date();
   const seedRow = async (row, category) => {
+    if (existingKeys.has(category + "|" + row.title)) return; // already present — don't touch its progress
     const ethNext = computeEthAwareNextDate(row.timing, today);
     const fallbackNext = row.recurrenceDays > 0 ? isoDate(addDays(today, 14)) : null;
     await put("planItems", {
@@ -571,6 +607,194 @@ function buildGradeNarrative(rows, lang) {
   return lines;
 }
 
+// ---------- HR report (period-scoped Word/.doc + PowerPoint export) ----------
+async function computeHrReportData(months) {
+  const end = new Date();
+  const start = addMonths(end, -months);
+  const startISO = isoDate(start), endISO = isoDate(end);
+
+  const members = await getAll("members");
+  const attendanceAll = await getAll("attendance");
+  const attendance = attendanceAll.filter((a) => a.sessionDate >= startISO && a.sessionDate <= endISO);
+  const sessionDates = [...new Set(attendance.map((a) => a.sessionDate))];
+  const newMembersCount = members.filter((m) => m.joinDate && m.joinDate >= startISO && m.joinDate <= endISO).length;
+  const onTime = attendance.filter((a) => a.status === "on-time").length;
+  const late = attendance.filter((a) => a.status === "late").length;
+
+  // No dedicated confession-history log is kept — approximated as members
+  // whose current lastConfessionDate falls inside the period.
+  const confessionsInPeriod = members.filter((m) => m.lastConfessionDate && m.lastConfessionDate >= startISO && m.lastConfessionDate <= endISO).length;
+
+  const currentStreaks = await computeConsecutiveAbsences();
+  const gradeStats = await computeGradeStats(startISO, endISO);
+  const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
+
+  const callRows = [];
+  members.forEach((m) => {
+    (m.callHistory || []).forEach((c) => {
+      if (c.date >= startISO && c.date <= endISO) callRows.push({ name: m.fullName, date: c.date, reason: c.reason || "-", calledBy: c.calledBy || "" });
+    });
+  });
+  callRows.sort((a, b) => b.date.localeCompare(a.date));
+
+  const planItemsAll = await getAll("planItems");
+  const planRows = planItemsAll.map((p) => {
+    const doneInPeriod = (p.doneLog || []).filter((d) => d.date >= startISO && d.date <= endISO).length;
+    let doneStr, status;
+    if (!p.recurrenceDays) {
+      doneStr = String(doneInPeriod);
+      status = "manual";
+    } else if (p.recurrenceDays <= 31) {
+      doneStr = `${doneInPeriod}/${months}`;
+      status = doneInPeriod >= months ? "onTrack" : "needsAttention";
+    } else {
+      doneStr = `${Math.min(doneInPeriod, 1)}/1`;
+      status = doneInPeriod >= 1 ? "onTrack" : "needsAttention";
+    }
+    return { ...p, doneStr, status };
+  });
+
+  return {
+    startISO, endISO, months,
+    totalMembers: members.length, newMembersCount,
+    sessionsHeld: sessionDates.length, totalScans: attendance.length, onTime, late,
+    confessionsInPeriod, currentStreakCount: currentStreaks.length,
+    gradeStats, gradeNarrative, callRows, planRows,
+  };
+}
+
+function planStatusLabel(status, lang) {
+  if (status === "manual") return lang === "am" ? "በእጅ የሚከታተል" : "Manual tracking";
+  if (status === "onTrack") return lang === "am" ? "በጥሩ ሁኔታ" : "On track";
+  return lang === "am" ? "ትኩረት ይፈልጋል" : "Needs attention";
+}
+
+// Produces an HTML file saved with a .doc extension — Word opens this
+// correctly (one "convert on open" prompt) but it is not a native binary
+// .docx. Kept intentionally lightweight so the app doesn't need a second
+// heavy document-generation dependency alongside pptxgenjs.
+function generateHrReportDoc(data) {
+  const lang = getLang();
+  const style = `
+    body{font-family:'Noto Sans Ethiopic',Arial,sans-serif;color:#222;}
+    h1{margin-bottom:2px;} h2{margin-top:28px;border-bottom:1px solid #999;padding-bottom:4px;}
+    table{border-collapse:collapse;width:100%;margin-top:10px;font-size:12px;}
+    th,td{border:1px solid #999;padding:5px 7px;text-align:left;}
+    th{background:#eee;}
+  `;
+  const statRow = (label, val) => `<tr><td>${label}</td><td>${val}</td></tr>`;
+  const gradeRows = data.gradeStats.rows.length
+    ? data.gradeStats.rows.map((r) => `<tr><td>${lang === "am" ? "ክፍል " : "Grade "}${r.grade}</td><td>${r.memberCount}</td><td>${r.scans}</td><td>${Math.round(r.rate * 100)}%</td></tr>`).join("")
+    : `<tr><td colspan="4">${lang === "am" ? "በቂ መረጃ የለም" : "Not enough data yet"}</td></tr>`;
+  const callRows = data.callRows.length
+    ? data.callRows.map((c) => `<tr><td>${c.name}</td><td>${c.date}</td><td>${c.reason}</td><td>${c.calledBy}</td></tr>`).join("")
+    : `<tr><td colspan="4">${lang === "am" ? "የለም" : "None"}</td></tr>`;
+  const planRows = data.planRows.map((p) => `<tr><td>${p.no}</td><td>${p.subUnit}</td><td>${p.title}</td><td>${p.metricTarget || p.timing || "-"}</td><td>${p.doneStr}</td><td>${planStatusLabel(p.status, lang)}</td></tr>`).join("");
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${style}</style></head><body>
+    <h1>${lang === "am" ? "ፍኖተ ጥበብ — ዲጂታል መገኘት" : "Finote Tibeb — Digital Attendance"}</h1>
+    <p>${data.startISO} → ${data.endISO} &nbsp;·&nbsp; ${ethLabel(data.startISO)} → ${ethLabel(data.endISO)}</p>
+    <h2>${lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance"}</h2>
+    <table>
+      ${statRow(lang === "am" ? "ጠቅላላ አባላት" : "Total members", data.totalMembers)}
+      ${statRow(lang === "am" ? "አዲስ አባላት" : "New members", data.newMembersCount)}
+      ${statRow(lang === "am" ? "የተካሄዱ ስብሰባዎች" : "Sessions held", data.sessionsHeld)}
+      ${statRow(lang === "am" ? "ጠቅላላ ቅኝቶች" : "Total attendance scans", `${data.totalScans} (${lang === "am" ? "በሰዓቱ" : "on-time"} ${data.onTime} / ${lang === "am" ? "ዘግይቶ" : "late"} ${data.late})`)}
+      ${statRow(lang === "am" ? "የተመዘገበ ንስሃ" : "Confessions recorded", data.confessionsInPeriod)}
+      ${statRow(lang === "am" ? "በአሁኑ ጊዜ ተከታታይ ቀሪ" : "Currently on absence streak", data.currentStreakCount)}
+    </table>
+    <h2>${lang === "am" ? "በደረጃ ትንተና (1-12)" : "Grade-level analysis (1-12)"}</h2>
+    <table><tr><th>${lang === "am" ? "ክፍል" : "Grade"}</th><th>${lang === "am" ? "ተማሪዎች" : "Students"}</th><th>${lang === "am" ? "ቅኝቶች" : "Scans"}</th><th>${lang === "am" ? "መጠን" : "Rate"}</th></tr>${gradeRows}</table>
+    ${data.gradeNarrative.length ? `<p>${data.gradeNarrative.join("<br>")}</p>` : ""}
+    <h2>${lang === "am" ? "የቀሪ አባላት ጥሪ ምክንያቶች" : "Absentee call reasons"}</h2>
+    <table><tr><th>${lang === "am" ? "ስም" : "Name"}</th><th>${lang === "am" ? "ቀን" : "Date"}</th><th>${lang === "am" ? "ምክንያት" : "Reason"}</th><th>${lang === "am" ? "የደወለው" : "Called by"}</th></tr>${callRows}</table>
+    <h2>${lang === "am" ? "በዕቅድ ላይ የተደረገ አፈጻጸም" : "Performance against the plan"}</h2>
+    <table><tr><th>#</th><th>${lang === "am" ? "ንዑስ ክፍል" : "Sub-unit"}</th><th>${lang === "am" ? "የዕቅድ ንጥል" : "Plan item"}</th><th>${lang === "am" ? "ዒላማ" : "Target"}</th><th>${lang === "am" ? "በጊዜው የተከናወነ" : "Done in period"}</th><th>${lang === "am" ? "ሁኔታ" : "Status"}</th></tr>${planRows}</table>
+  </body></html>`;
+
+  const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+  downloadBlob(blob, `HR-report-${data.months}mo-${todayISO()}.doc`);
+}
+
+// Requires pptxgenjs to be loaded globally (see index.html) — a well
+// supported, purely client-side .pptx generator.
+async function generateHrReportPptx(data) {
+  if (typeof PptxGenJS === "undefined") {
+    alert(getLang() === "am" ? "PptxGenJS አልተጫነም" : "PptxGenJS library not loaded — add the CDN script tag to index.html.");
+    return;
+  }
+  const lang = getLang();
+  const pptx = new PptxGenJS();
+  pptx.defineLayout({ name: "FTW", width: 10, height: 5.63 });
+  pptx.layout = "FTW";
+  const tblOpts = { border: { type: "solid", color: "CCCCCC" } };
+
+  const titleSlide = pptx.addSlide();
+  titleSlide.addText(lang === "am" ? "ፍኖተ ጥበብ — ዲጂታል መገኘት" : "Finote Tibeb — Digital Attendance", { x: 0.5, y: 1.8, w: 9, h: 1, fontSize: 28, bold: true });
+  titleSlide.addText(`${data.startISO} → ${data.endISO}`, { x: 0.5, y: 2.7, w: 9, h: 0.5, fontSize: 16, color: "666666" });
+
+  const overviewSlide = pptx.addSlide();
+  overviewSlide.addText(lang === "am" ? "አጠቃላይ አፈጻጸም" : "Overall performance", { x: 0.4, y: 0.3, fontSize: 22, bold: true });
+  overviewSlide.addTable([
+    [{ text: lang === "am" ? "ጠቅላላ አባላት" : "Total members" }, { text: String(data.totalMembers) }],
+    [{ text: lang === "am" ? "አዲስ አባላት" : "New members" }, { text: String(data.newMembersCount) }],
+    [{ text: lang === "am" ? "የተካሄዱ ስብሰባዎች" : "Sessions held" }, { text: String(data.sessionsHeld) }],
+    [{ text: lang === "am" ? "ጠቅላላ ቅኝቶች" : "Total scans" }, { text: `${data.totalScans} (${data.onTime}/${data.late})` }],
+    [{ text: lang === "am" ? "የተመዘገበ ንስሃ" : "Confessions recorded" }, { text: String(data.confessionsInPeriod) }],
+    [{ text: lang === "am" ? "ተከታታይ ቀሪ" : "On absence streak" }, { text: String(data.currentStreakCount) }],
+  ], { x: 0.4, y: 0.9, w: 9, colW: [5, 4], fontSize: 14, ...tblOpts });
+
+  const gradeSlide = pptx.addSlide();
+  gradeSlide.addText(lang === "am" ? "በደረጃ ትንተና" : "Grade-level analysis", { x: 0.4, y: 0.3, fontSize: 22, bold: true });
+  const gradeTableRows = [[
+    { text: lang === "am" ? "ክፍል" : "Grade", options: { bold: true } }, { text: lang === "am" ? "ተማሪዎች" : "Students", options: { bold: true } },
+    { text: lang === "am" ? "ቅኝቶች" : "Scans", options: { bold: true } }, { text: lang === "am" ? "መጠን" : "Rate", options: { bold: true } },
+  ]];
+  if (data.gradeStats.rows.length) {
+    data.gradeStats.rows.forEach((r) => gradeTableRows.push([
+      { text: `${lang === "am" ? "ክፍል " : "Grade "}${r.grade}` }, { text: String(r.memberCount) }, { text: String(r.scans) }, { text: `${Math.round(r.rate * 100)}%` },
+    ]));
+  } else {
+    gradeTableRows.push([{ text: lang === "am" ? "በቂ መረጃ የለም" : "Not enough data yet", options: { colspan: 4 } }]);
+  }
+  gradeSlide.addTable(gradeTableRows, { x: 0.4, y: 0.9, w: 9, fontSize: 13, ...tblOpts });
+
+  const callSlide = pptx.addSlide();
+  callSlide.addText(lang === "am" ? "የቀሪ አባላት ጥሪ ምክንያቶች" : "Absentee call reasons", { x: 0.4, y: 0.3, fontSize: 22, bold: true });
+  const callTableRows = [[
+    { text: lang === "am" ? "ስም" : "Name", options: { bold: true } }, { text: lang === "am" ? "ቀን" : "Date", options: { bold: true } },
+    { text: lang === "am" ? "ምክንያት" : "Reason", options: { bold: true } }, { text: lang === "am" ? "የደወለው" : "Called by", options: { bold: true } },
+  ]];
+  data.callRows.slice(0, 15).forEach((c) => callTableRows.push([{ text: c.name }, { text: c.date }, { text: c.reason }, { text: c.calledBy }]));
+  if (!data.callRows.length) callTableRows.push([{ text: lang === "am" ? "የለም" : "None", options: { colspan: 4 } }]);
+  callSlide.addTable(callTableRows, { x: 0.4, y: 0.9, w: 9, fontSize: 11, ...tblOpts });
+  if (data.callRows.length > 15) {
+    callSlide.addText(
+      lang === "am" ? `+ ${data.callRows.length - 15} ተጨማሪ...` : `+ ${data.callRows.length - 15} more...`,
+      { x: 0.4, y: 5.1, fontSize: 10, italic: true, color: "888888" }
+    );
+  }
+
+  const planChunks = [];
+  for (let i = 0; i < data.planRows.length; i += 10) planChunks.push(data.planRows.slice(i, i + 10));
+  planChunks.forEach((chunk, idx) => {
+    const slide = pptx.addSlide();
+    slide.addText(
+      (lang === "am" ? "በዕቅድ ላይ የተደረገ አፈጻጸም" : "Performance against the plan") + (planChunks.length > 1 ? ` (${idx + 1}/${planChunks.length})` : ""),
+      { x: 0.4, y: 0.3, fontSize: 20, bold: true }
+    );
+    const rows = [[
+      { text: "#", options: { bold: true } }, { text: lang === "am" ? "ንዑስ ክፍል" : "Sub-unit", options: { bold: true } },
+      { text: lang === "am" ? "የዕቅድ ንጥል" : "Plan item", options: { bold: true } }, { text: lang === "am" ? "የተከናወነ" : "Done", options: { bold: true } },
+      { text: lang === "am" ? "ሁኔታ" : "Status", options: { bold: true } },
+    ]];
+    chunk.forEach((p) => rows.push([{ text: String(p.no) }, { text: p.subUnit }, { text: p.title }, { text: p.doneStr }, { text: planStatusLabel(p.status, lang) }]));
+    slide.addTable(rows, { x: 0.3, y: 0.85, w: 9.4, colW: [0.4, 1.8, 4.2, 1.0, 2.0], fontSize: 9, ...tblOpts });
+  });
+
+  await pptx.writeFile({ fileName: `HR-report-${data.months}mo-${todayISO()}.pptx` });
+}
+
 // ---------- JSON export/import ----------
 async function exportScansJSON() {
   const attendance = await getAll("attendance");
@@ -615,6 +839,72 @@ async function exportAttendanceExcel() {
   XLSX.writeFile(wb, `finote-attendance-${todayISO()}.xlsx`);
 }
 
+// ---------- Department chairs (heads) ----------
+async function getDeptHeads() {
+  const row = await get("settings", "deptHeads");
+  return (row && row.value) || {};
+}
+async function setDeptHead(dept, name) {
+  const heads = await getDeptHeads();
+  heads[dept] = name;
+  await setSetting("deptHeads", heads);
+}
+
+// ---------- Family structure ----------
+// Father/mother/first son/children are all existing member records —
+// families only store references (ids) plus a free-text address code the
+// admin used to cluster them, since neighborhood grouping from house
+// numbers (e.g. 456/01 relating to 454, 440, 485) isn't a fixed numeric
+// rule and has to stay a human judgment call, not an auto-computed one.
+async function addFamily(data) {
+  const fam = {
+    id: uid(),
+    fatherId: data.fatherId || null,
+    motherId: data.motherId || null,
+    firstSonId: data.firstSonId || null,
+    childrenIds: data.childrenIds || [],
+    addressCode: data.addressCode || "",
+    lastMeetingDate: null,
+    meetingLog: [],
+    synced: false,
+  };
+  await put("families", fam);
+  return fam;
+}
+async function updateFamily(id, patch) {
+  const fam = await get("families", id);
+  if (!fam) return;
+  Object.assign(fam, patch, { synced: false });
+  await put("families", fam);
+}
+window.deleteFamily = async (id) => {
+  if (!confirm(getLang() === "am" ? "ይህን ቤተሰብ መሰረዝ ይፈልጋሉ?" : "Delete this family?")) return;
+  const row = await get("families", id);
+  if (row) await del("families", id);
+  if (typeof RENDERERS !== "undefined" && RENDERERS[currentTab]) RENDERERS[currentTab]();
+};
+window.markFamilyMet = async (id) => {
+  const fam = await get("families", id);
+  if (!fam) return;
+  const today = todayISO();
+  fam.lastMeetingDate = today;
+  fam.meetingLog = fam.meetingLog || [];
+  fam.meetingLog.push({ date: today });
+  fam.synced = false;
+  await put("families", fam);
+  if (typeof RENDERERS !== "undefined" && RENDERERS[currentTab]) RENDERERS[currentTab]();
+};
+async function computeFamilyMeetingsDue() {
+  const families = await getAll("families");
+  const today = new Date();
+  return families.filter((f) => f.fatherId || f.motherId).filter((f) => {
+    if (!f.lastMeetingDate) return true;
+    const last = new Date(f.lastMeetingDate);
+    const monthsSince = (today.getFullYear() - last.getFullYear()) * 12 + (today.getMonth() - last.getMonth());
+    return monthsSince >= 1;
+  });
+}
+
 // ---------- UI helpers ----------
 function el(id) { return document.getElementById(id); }
 
@@ -622,7 +912,15 @@ function applyStaticI18n() {
   el("headerTitle").textContent = t("app.title");
   el("headerSub").textContent = t("app.subtitle");
   el("headerMotto").textContent = t("app.motto");
-  document.querySelectorAll(".tab-btn").forEach((b) => { b.querySelector(".lbl").textContent = t("nav." + b.dataset.tab); });
+  document.querySelectorAll(".tab-btn").forEach((b) => {
+    if (b.dataset.tab === "groups") return; // no i18n.js entry for this yet — labeled explicitly below
+    b.querySelector(".lbl").textContent = t("nav." + b.dataset.tab);
+  });
+  const groupsBtn = document.querySelector('.tab-btn[data-tab="groups"]');
+  if (groupsBtn) {
+    const lbl = groupsBtn.querySelector(".lbl");
+    if (lbl) lbl.textContent = getLang() === "am" ? "ቡድኖች" : "Groups";
+  }
   document.documentElement.lang = getLang();
   const langBtn = el("langToggle");
   if (langBtn) langBtn.textContent = getLang() === "am" ? "EN" : "አማ";
@@ -731,6 +1029,22 @@ async function renderDashboard() {
   const today = todayISO();
   const todayCount = attendance.filter((a) => a.sessionDate === today).length;
   const thr = settings.absenceThreshold || 3;
+  const lang = getLang();
+
+  const families = await getAll("families");
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const childToFamily = new Map();
+  families.forEach((f) => {
+    if (f.firstSonId) childToFamily.set(f.firstSonId, f);
+    (f.childrenIds || []).forEach((cid) => childToFamily.set(cid, f));
+  });
+  const familyMeetingsDue = await computeFamilyMeetingsDue();
+  function familyContactLine(f) {
+    const father = f.fatherId ? memberMap.get(f.fatherId) : null;
+    const mother = f.motherId ? memberMap.get(f.motherId) : null;
+    const part = (label, m) => m ? `${label}: ${m.fullName}${m.phone ? ` <a href="tel:${m.phone.replace(/\s+/g, "")}" onclick="event.stopPropagation();">${m.phone}</a>` : ""}` : "";
+    return [part(lang === "am" ? "አባት" : "Father", father), part(lang === "am" ? "እናት" : "Mother", mother)].filter(Boolean).join(" · ");
+  }
 
   const filterOptions = [
     { value: "allCalendar", label: t("dash.filterAllCalendar") },
@@ -766,11 +1080,25 @@ async function renderDashboard() {
     ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
 
     <h3 class="section-title">${t("dash.confessionTitle")}</h3>
-    ${confessionDue.length ? `<div class="list">${confessionDue.map(c => `
+    ${confessionDue.length ? `<div class="list">${confessionDue.map(c => {
+      const fam = childToFamily.get(c.member.id);
+      const contactLine = fam ? familyContactLine(fam) : "";
+      return `
       <div class="list-row">
-        <div><b>${c.member.fullName}</b><br><span class="muted">${c.monthsSince === null ? t("dash.confessionUnset") : t("dash.confessionMonthsAgo", { n: c.monthsSince })}</span></div>
+        <div><b>${c.member.fullName}</b><br><span class="muted">${c.monthsSince === null ? t("dash.confessionUnset") : t("dash.confessionMonthsAgo", { n: c.monthsSince })}</span>${contactLine ? `<br><span class="muted">${contactLine}</span>` : ""}</div>
         <button class="btn-small" onclick="markConfessed('${c.member.id}')">${t("dash.confessDone")}</button>
-      </div>`).join("")}</div>` : `<p class="muted">${t("dash.noConfessionDue")}</p>`}
+      </div>`;
+    }).join("")}</div>` : `<p class="muted">${t("dash.noConfessionDue")}</p>`}
+
+    <h3 class="section-title">${lang === "am" ? "ወርሃዊ የቤተሰብ ስብሰባ" : "Monthly Family Meetings"}</h3>
+    ${familyMeetingsDue.length ? `<div class="list">${familyMeetingsDue.map(f => {
+      const line = familyContactLine(f);
+      return `
+      <div class="list-row">
+        <div>${line || (lang === "am" ? "(ያልተሟላ ቤተሰብ)" : "(incomplete family)")}</div>
+        <button class="btn-small" onclick="markFamilyMet('${f.id}')">${lang === "am" ? "ተገናኝተዋል" : "Met"}</button>
+      </div>`;
+    }).join("")}</div>` : `<p class="muted">${lang === "am" ? "ሁሉም ቤተሰቦች ተገናኝተዋል" : "All families are up to date"}</p>`}
 
     <h3 class="section-title">${t("dash.hrTitle")}</h3>
     <div class="list">${hrDue.map(e => `
@@ -1267,17 +1595,7 @@ async function printAllQr(members) {
 window.openRegistrationModal = async function(editId) {
   const member = editId ? await get("members", editId) : null;
   const isEdit = !!member;
-  const deptOptions = [
-    "ትምህርትና ስልጠና ክፍል",
-    "ዜማና ስነ-ጥበባት ክፍል",
-    "መርኃ ግብርና ጉባኤያት ክፍል",
-    "የሰው ሀብት አስተዳደር ክፍል",
-    "የፋይናንስ እና ንብረት አስተዳደር ክፍል",
-    "እቅድ እና ልማት ክፍል",
-    "መረጃና የውስጥ ግንኙነት ክፍል",
-    "የሕጻናት እና ታዳጊዎች አስተዳደር ክፍል",
-    "ምግባረ ሰናይ ክፍል"
-  ];
+  const deptOptions = DEPT_OPTIONS;
 
   const deptSelect = (name, selected) => `
     <select id="${name}" class="text-input">
@@ -1324,7 +1642,7 @@ window.openRegistrationModal = async function(editId) {
         <label>${t("members.grade")}</label>
         <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}">
         <label>${t("members.assignedDept")}</label>
-        <input id="f_assignedDept" class="text-input" value="${member?.category||''}" placeholder="${t("members.assignedDeptPlaceholder")}">
+        ${deptSelect('f_assignedDept', member?.category)}
         <label>${t("members.deptPref1")}</label>
         ${deptSelect('f_dept1', member?.dept1)}
         <label>${t("members.deptPref2")}</label>
@@ -1581,12 +1899,27 @@ async function renderReports() {
   const members = await getAll("members");
   const memberMap = new Map(members.map((m) => [m.id, m]));
   const progs = PROGRAM_DEFS();
+  const lang = getLang();
   const earliestDate = attendance.length ? attendance.reduce((min, a) => (a.sessionDate < min ? a.sessionDate : min), attendance[0].sessionDate) : todayISO();
   const gradeStats = await computeGradeStats(earliestDate, todayISO());
   const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
 
   el("view").innerHTML = `
     <div class="toolbar"><button id="repExcel" class="btn-secondary">${t("reports.downloadExcel")}</button></div>
+
+    <h3 class="section-title">${lang === "am" ? "የ HR ሪፖርት አመንጭ" : "Generate HR Report"}</h3>
+    <div class="toolbar">
+      <select id="hrReportPeriod" class="text-input" style="width:auto;flex:1;">
+        <option value="3">${lang === "am" ? "3 ወር" : "3 Months"}</option>
+        <option value="6">${lang === "am" ? "6 ወር" : "6 Months"}</option>
+        <option value="12">${lang === "am" ? "ዓመታዊ" : "Yearly"}</option>
+      </select>
+    </div>
+    <div class="toolbar">
+      <button id="hrReportWordBtn" class="btn-secondary">Word</button>
+      <button id="hrReportPptxBtn" class="btn-secondary">PowerPoint</button>
+      <button id="hrReportBothBtn" class="btn-primary">${lang === "am" ? "ሁለቱንም" : "Both"}</button>
+    </div>
 
     <h3 class="section-title">${t("charts.attendanceTrend")}</h3>
     <div class="chart-box"><canvas id="trendChart"></canvas></div>
@@ -1609,6 +1942,16 @@ async function renderReports() {
   `;
   el("repExcel").onclick = exportAttendanceExcel;
   drawCharts(attendance, progs, gradeStats);
+
+  const runHrReport = async (which) => {
+    const months = Number(el("hrReportPeriod").value);
+    const data = await computeHrReportData(months);
+    if (which === "word" || which === "both") generateHrReportDoc(data);
+    if (which === "pptx" || which === "both") await generateHrReportPptx(data);
+  };
+  el("hrReportWordBtn").onclick = () => runHrReport("word");
+  el("hrReportPptxBtn").onclick = () => runHrReport("pptx");
+  el("hrReportBothBtn").onclick = () => runHrReport("both");
 }
 
 // ---------- Plan ----------
@@ -1740,6 +2083,261 @@ function generatePlanReport(planItems) {
   win.focus();
   setTimeout(() => win.print(), 300);
 }
+
+// ---------- Groups: department roster + family structure ----------
+window.toggleDeptGroup = (i) => {
+  const box = el("deptGroup_" + i);
+  if (box) box.style.display = box.style.display === "none" ? "block" : "none";
+};
+window.toggleFamilyGroup = (id) => {
+  const box = el("familyGroup_" + id);
+  if (box) box.style.display = box.style.display === "none" ? "block" : "none";
+};
+window.editDeptHead = async (encodedDept) => {
+  const dept = decodeURIComponent(encodedDept);
+  const lang = getLang();
+  const current = (await getDeptHeads())[dept] || "";
+  const name = prompt(lang === "am" ? `የ${dept} ሰብሳቢ ስም` : `Chair's name for ${dept}`, current);
+  if (name === null) return;
+  await setDeptHead(dept, name.trim());
+  renderGroups();
+};
+
+async function renderGroups() {
+  const lang = getLang();
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const families = await getAll("families");
+  const deptHeads = await getDeptHeads();
+
+  el("view").innerHTML = `
+    <h3 class="section-title">${lang === "am" ? "በክፍል" : "By Department"}</h3>
+    <div class="list">
+      ${DEPT_OPTIONS.map((dept, i) => {
+        const deptMembers = members.filter((m) => m.category === dept);
+        const head = deptHeads[dept] || (lang === "am" ? "(ሰብሳቢ አልተመደበም)" : "(no chair assigned)");
+        return `
+          <div class="list-row" style="flex-direction:column;align-items:stretch;">
+            <div class="list-row" style="padding:0;cursor:pointer;" onclick="toggleDeptGroup(${i})">
+              <div style="flex:1;">
+                <b>${head}</b><br>
+                <span class="muted">${dept} · ${lang === "am" ? "ሰብሳቢ" : "Chair"} · ${deptMembers.length} ${lang === "am" ? "አባላት" : "members"}</span>
+              </div>
+              <button class="btn-small" onclick="event.stopPropagation();editDeptHead('${encodeURIComponent(dept)}')">${lang === "am" ? "ሰብሳቢ ቀይር" : "Edit Chair"}</button>
+            </div>
+            <div id="deptGroup_${i}" class="list" style="display:none;margin-top:8px;">
+              ${deptMembers.length ? deptMembers.map((m) => `
+                <div class="list-row"><div>${m.fullName}${m.phone ? ` <span class="muted">· ${m.phone}</span>` : ""}</div></div>
+              `).join("") : `<p class="muted">${lang === "am" ? "የተመደበ አባል የለም" : "No members assigned"}</p>`}
+            </div>
+          </div>`;
+      }).join("")}
+    </div>
+
+    <h3 class="section-title">${lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure"}</h3>
+    <div class="toolbar">
+      <button id="addFamilyBtn" class="btn-primary">${lang === "am" ? "ቤተሰብ ጨምር" : "Add Family"}</button>
+      <button id="exportFamiliesBtn" class="btn-secondary">${lang === "am" ? "ኤክሴል አውርድ" : "Export Excel"}</button>
+    </div>
+    <div class="list">
+      ${families.length ? families.map((f) => {
+        const father = f.fatherId ? memberMap.get(f.fatherId) : null;
+        const mother = f.motherId ? memberMap.get(f.motherId) : null;
+        const firstSon = f.firstSonId ? memberMap.get(f.firstSonId) : null;
+        const children = (f.childrenIds || []).map((id) => memberMap.get(id)).filter(Boolean);
+        return `
+          <div class="list-row" style="flex-direction:column;align-items:stretch;">
+            <div class="list-row" style="padding:0;cursor:pointer;" onclick="toggleFamilyGroup('${f.id}')">
+              <div style="flex:1;">
+                <b>${father ? father.fullName : (lang === "am" ? "(አባት አልተመደበም)" : "(no father)")} ${lang === "am" ? "እና" : "&"} ${mother ? mother.fullName : (lang === "am" ? "(እናት አልተመደበም)" : "(no mother)")}</b><br>
+                <span class="muted">${f.addressCode ? f.addressCode + " · " : ""}${children.length + (firstSon ? 1 : 0)} ${lang === "am" ? "ልጆች" : "children"}</span>
+              </div>
+              <div class="row-actions">
+                <button class="btn-small" onclick="event.stopPropagation();openFamilyModal('${f.id}')">${t("members.edit")}</button>
+                <button class="btn-small" onclick="event.stopPropagation();deleteFamily('${f.id}')">${t("members.delete")}</button>
+              </div>
+            </div>
+            <div id="familyGroup_${f.id}" class="list" style="display:none;margin-top:8px;">
+              ${firstSon ? `<div class="list-row"><div><b>${lang === "am" ? "የበኩር ልጅ" : "First Son"}:</b> ${firstSon.fullName}</div></div>` : ""}
+              ${children.length ? children.map((c) => `<div class="list-row"><div>${c.fullName}</div></div>`).join("") : (!firstSon ? `<p class="muted">${lang === "am" ? "ልጆች አልተመደቡም" : "No children assigned"}</p>` : "")}
+            </div>
+          </div>`;
+      }).join("") : `<p class="muted">${lang === "am" ? "ገና ቤተሰብ አልተመዘገበም" : "No families added yet"}</p>`}
+    </div>
+  `;
+
+  el("addFamilyBtn").onclick = () => openFamilyModal();
+  el("exportFamiliesBtn").onclick = () => exportFamiliesExcel(families, memberMap);
+}
+
+async function exportFamiliesExcel(families, memberMap) {
+  if (typeof XLSX === "undefined") { alert("XLSX library not loaded"); return; }
+  const rows = families.map((f) => {
+    const father = f.fatherId ? memberMap.get(f.fatherId) : null;
+    const mother = f.motherId ? memberMap.get(f.motherId) : null;
+    const firstSon = f.firstSonId ? memberMap.get(f.firstSonId) : null;
+    const children = (f.childrenIds || []).map((id) => memberMap.get(id)).filter(Boolean);
+    return {
+      "አባት": father?.fullName || "", "የአባት ስልክ": father?.phone || "",
+      "እናት": mother?.fullName || "", "የእናት ስልክ": mother?.phone || "",
+      "የበኩር ልጅ": firstSon?.fullName || "",
+      "ሌሎች ልጆች": children.map((c) => c.fullName).join(", "),
+      "የአድራሻ ኮድ": f.addressCode || "",
+      "የመጨረሻ ስብሰባ": f.lastMeetingDate || "",
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Families");
+  XLSX.writeFile(wb, `finote-families-${todayISO()}.xlsx`);
+}
+
+// Add/edit family modal — father/mother/first-son are single-pick search
+// boxes, children is a multi-pick list. Typing in any search box filters
+// by name OR address substring; the address-code field above them narrows
+// every search to that code too, so an admin can type "456" and manually
+// eyeball which nearby-but-not-identical addresses (454, 440, 485, ...)
+// belong to the same neighborhood — that judgment call stays manual on
+// purpose, see the comment above addFamily().
+window.openFamilyModal = async function (editId) {
+  const family = editId ? await get("families", editId) : null;
+  const isEdit = !!family;
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const lang = getLang();
+
+  let fatherId = family?.fatherId || null;
+  let motherId = family?.motherId || null;
+  let firstSonId = family?.firstSonId || null;
+  let childrenIds = family ? [...(family.childrenIds || [])] : [];
+
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.innerHTML = `
+    <div class="modal-inner" style="max-width:520px;max-height:90vh;overflow-y:auto;text-align:left;">
+      <h3>${isEdit ? (lang === "am" ? "ቤተሰብ አርትዕ" : "Edit Family") : (lang === "am" ? "ቤተሰብ ጨምር" : "Add Family")}</h3>
+      <label>${lang === "am" ? "የአድራሻ ኮድ (ለማጣራት)" : "Address code (for filtering)"}</label>
+      <input id="fam_addrFilter" class="text-input" placeholder="${lang === "am" ? "ለምሳሌ 456" : "e.g. 456"}" value="${family?.addressCode || ""}">
+
+      <label>${lang === "am" ? "አባት" : "Father"}</label>
+      <div id="fam_fatherChip"></div>
+      <input id="fam_fatherSearch" class="text-input" placeholder="${lang === "am" ? "ስም ወይም አድራሻ ይፈልጉ" : "Search name or address"}">
+      <div id="fam_fatherResults" class="list"></div>
+
+      <label>${lang === "am" ? "እናት" : "Mother"}</label>
+      <div id="fam_motherChip"></div>
+      <input id="fam_motherSearch" class="text-input" placeholder="${lang === "am" ? "ስም ወይም አድራሻ ይፈልጉ" : "Search name or address"}">
+      <div id="fam_motherResults" class="list"></div>
+
+      <label>${lang === "am" ? "የበኩር ልጅ" : "First Son"}</label>
+      <div id="fam_sonChip"></div>
+      <input id="fam_sonSearch" class="text-input" placeholder="${lang === "am" ? "ስም ወይም አድራሻ ይፈልጉ" : "Search name or address"}">
+      <div id="fam_sonResults" class="list"></div>
+
+      <label>${lang === "am" ? "ሌሎች ልጆች" : "Other Children"}</label>
+      <div id="fam_childrenChips"></div>
+      <input id="fam_childrenSearch" class="text-input" placeholder="${lang === "am" ? "ስም ወይም አድራሻ ይፈልጉ" : "Search name or address"}">
+      <div id="fam_childrenResults" class="list"></div>
+
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button id="fam_saveBtn" class="btn-primary">${lang === "am" ? "አስቀምጥ" : "Save"}</button>
+        <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">${t("members.close")}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+
+  function matchesFilter(m, q) {
+    const addrFilter = el("fam_addrFilter").value.trim();
+    const qq = q.toLowerCase();
+    const nameMatch = !qq || m.fullName.toLowerCase().includes(qq) || (m.address || "").toLowerCase().includes(qq);
+    const addrMatch = !addrFilter || (m.address || "").includes(addrFilter);
+    return nameMatch && addrMatch;
+  }
+
+  function renderChip(containerId, id, onRemove) {
+    const m = id ? memberMap.get(id) : null;
+    el(containerId).innerHTML = m
+      ? `<div class="list-row"><div><b>${m.fullName}</b>${m.address ? ` <span class="muted">· ${m.address}</span>` : ""}</div><button class="btn-small" data-remove="1">✕</button></div>`
+      : `<p class="muted" style="margin:4px 0;">${lang === "am" ? "አልተመረጠም" : "Not selected"}</p>`;
+    if (m) el(containerId).querySelector("[data-remove]").onclick = onRemove;
+  }
+
+  function renderChildrenChips() {
+    el("fam_childrenChips").innerHTML = childrenIds.length
+      ? childrenIds.map((id) => {
+          const m = memberMap.get(id);
+          return m ? `<div class="list-row"><div>${m.fullName}${m.address ? ` <span class="muted">· ${m.address}</span>` : ""}</div><button class="btn-small" data-remove-child="${id}">✕</button></div>` : "";
+        }).join("")
+      : `<p class="muted" style="margin:4px 0;">${lang === "am" ? "ገና የለም" : "None yet"}</p>`;
+    el("fam_childrenChips").querySelectorAll("[data-remove-child]").forEach((btn) => {
+      btn.onclick = () => { childrenIds = childrenIds.filter((x) => x !== btn.dataset.removeChild); renderChildrenChips(); };
+    });
+  }
+
+  function wireSingleSearch(searchId, resultsId, chipId, setCurrent) {
+    let timeout;
+    el(searchId).oninput = (e) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        const q = e.target.value.trim();
+        if (!q) { el(resultsId).innerHTML = ""; return; }
+        const results = members.filter((m) => matchesFilter(m, q)).slice(0, 10);
+        el(resultsId).innerHTML = results.map((m) => `
+          <div class="list-row"><div>${m.fullName}${m.address ? ` <span class="muted">· ${m.address}</span>` : ""}</div><button class="btn-small" data-pick="${m.id}">${lang === "am" ? "ምረጥ" : "Pick"}</button></div>
+        `).join("");
+        el(resultsId).querySelectorAll("[data-pick]").forEach((btn) => {
+          btn.onclick = () => {
+            setCurrent(btn.dataset.pick);
+            el(searchId).value = "";
+            el(resultsId).innerHTML = "";
+            renderChip(chipId, btn.dataset.pick, () => { setCurrent(null); renderChip(chipId, null); });
+          };
+        });
+      }, 200);
+    };
+  }
+
+  renderChip("fam_fatherChip", fatherId, () => { fatherId = null; renderChip("fam_fatherChip", null); });
+  renderChip("fam_motherChip", motherId, () => { motherId = null; renderChip("fam_motherChip", null); });
+  renderChip("fam_sonChip", firstSonId, () => { firstSonId = null; renderChip("fam_sonChip", null); });
+  renderChildrenChips();
+
+  wireSingleSearch("fam_fatherSearch", "fam_fatherResults", "fam_fatherChip", (id) => { fatherId = id; });
+  wireSingleSearch("fam_motherSearch", "fam_motherResults", "fam_motherChip", (id) => { motherId = id; });
+  wireSingleSearch("fam_sonSearch", "fam_sonResults", "fam_sonChip", (id) => { firstSonId = id; });
+
+  let childTimeout;
+  el("fam_childrenSearch").oninput = (e) => {
+    clearTimeout(childTimeout);
+    childTimeout = setTimeout(() => {
+      const q = e.target.value.trim();
+      if (!q) { el("fam_childrenResults").innerHTML = ""; return; }
+      const results = members.filter((m) => matchesFilter(m, q) && !childrenIds.includes(m.id)).slice(0, 10);
+      el("fam_childrenResults").innerHTML = results.map((m) => `
+        <div class="list-row"><div>${m.fullName}${m.address ? ` <span class="muted">· ${m.address}</span>` : ""}</div><button class="btn-small" data-add="${m.id}">+</button></div>
+      `).join("");
+      el("fam_childrenResults").querySelectorAll("[data-add]").forEach((btn) => {
+        btn.onclick = () => {
+          if (!childrenIds.includes(btn.dataset.add)) childrenIds.push(btn.dataset.add);
+          renderChildrenChips();
+          el("fam_childrenSearch").value = "";
+          el("fam_childrenResults").innerHTML = "";
+        };
+      });
+    }, 200);
+  };
+
+  el("fam_saveBtn").onclick = async () => {
+    const addressCode = el("fam_addrFilter").value.trim();
+    if (isEdit) {
+      await updateFamily(family.id, { fatherId, motherId, firstSonId, childrenIds, addressCode });
+    } else {
+      await addFamily({ fatherId, motherId, firstSonId, childrenIds, addressCode });
+    }
+    box.remove();
+    renderGroups();
+  };
+};
 
 // ---------- Settings ----------
 async function renderSettings() {
@@ -1901,7 +2499,7 @@ async function renderSettings() {
 }
 
 // ---------- Tabs ----------
-const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, settings: renderSettings, reports: renderReports };
+const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, groups: renderGroups, settings: renderSettings, reports: renderReports };
 
 function setTab(tabName) {
   if (scanState.streaming) toggleCamera();
