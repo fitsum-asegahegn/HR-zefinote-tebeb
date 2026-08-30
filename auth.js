@@ -184,7 +184,7 @@ async function saveDisplayName(name) {
 }
 window.saveDisplayName = saveDisplayName;
 
-// ---------- Cloud sync (Supabase tables: members, attendance, hr_events) ----------
+// ---------- Cloud sync (Supabase tables: members, attendance, hr_events, families, dept_heads) ----------
 function mapMemberToRemote(m) {
   return {
     id: m.id, full_name: m.fullName, phone: m.phone || null, category: m.category || null, grade: m.grade || null,
@@ -221,6 +221,20 @@ function mapRemoteToAttendance(r) {
     timestamp: r.ts, status: r.status, deviceId: r.device_id, synced: true,
   };
 }
+function mapFamilyToRemote(f) {
+  return {
+    id: f.id, father_id: f.fatherId || null, mother_id: f.motherId || null, first_son_id: f.firstSonId || null,
+    children_ids: f.childrenIds || [], address_code: f.addressCode || null,
+    last_meeting_date: f.lastMeetingDate || null, meeting_log: f.meetingLog || [],
+  };
+}
+function mapRemoteToFamily(r) {
+  return {
+    id: r.id, fatherId: r.father_id || null, motherId: r.mother_id || null, firstSonId: r.first_son_id || null,
+    childrenIds: r.children_ids || [], addressCode: r.address_code || "",
+    lastMeetingDate: r.last_meeting_date || null, meetingLog: r.meeting_log || [], synced: true,
+  };
+}
 
 async function syncNow() {
   const statusEl = el("syncStatus");
@@ -248,6 +262,27 @@ async function syncNow() {
         .upsert(pendingAtt.map((a) => mapAttendanceToRemote(a, session.user.id)), { onConflict: "member_id,session_date,program_key" });
       if (!error) for (const a of pendingAtt) { a.synced = true; await put("attendance", a); }
     }
+    // push families
+    const families = await getAll("families");
+    const pendingFamilies = families.filter((f) => !f.synced);
+    if (pendingFamilies.length) {
+      const { error } = await sbClient.from("families").upsert(pendingFamilies.map(mapFamilyToRemote));
+      if (!error) for (const f of pendingFamilies) { f.synced = true; await put("families", f); }
+    }
+    // push + pull department chairs — small table, always synced in full
+    // rather than tracked with a per-key dirty flag (see getDeptHeads/setDeptHead in app.js)
+    const deptHeads = await getDeptHeads();
+    const deptHeadRows = Object.entries(deptHeads).map(([dept, head_name]) => ({ dept, head_name }));
+    if (deptHeadRows.length) {
+      await sbClient.from("dept_heads").upsert(deptHeadRows);
+    }
+    const { data: remoteDeptHeads } = await sbClient.from("dept_heads").select("*");
+    if (remoteDeptHeads) {
+      const mergedHeads = { ...deptHeads };
+      remoteDeptHeads.forEach((r) => { mergedHeads[r.dept] = r.head_name; });
+      await setSetting("deptHeads", mergedHeads);
+    }
+
     // pull remote changes
     const settings = await getSettings();
     const since = settings.lastPulledAt || "1970-01-01T00:00:00Z";
@@ -265,6 +300,14 @@ async function syncNow() {
     }
     const { data: remoteAtt } = await sbClient.from("attendance").select("*").gt("updated_at", since);
     if (remoteAtt) for (const ra of remoteAtt) await put("attendance", mapRemoteToAttendance(ra));
+    const { data: remoteFamilies } = await sbClient.from("families").select("*").gt("updated_at", since);
+    if (remoteFamilies) {
+      for (const rf of remoteFamilies) {
+        const existing = await get("families", rf.id);
+        const mapped = mapRemoteToFamily(rf);
+        await put("families", existing ? { ...existing, ...mapped } : mapped);
+      }
+    }
     await setSetting("lastPulledAt", new Date().toISOString());
     setStatus(t("sync.done"));
   } catch (err) {
