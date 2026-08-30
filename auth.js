@@ -190,6 +190,11 @@ function mapMemberToRemote(m) {
     id: m.id, full_name: m.fullName, phone: m.phone || null, category: m.category || null, grade: m.grade || null,
     qr_id: m.qrId, last_confession_date: m.lastConfessionDate, join_date: m.joinDate, active: m.active !== false,
     call_log: m.callLog || null, call_history: m.callHistory || [],
+    christian_name: m.christianName || null, gender: m.gender || null, age: m.age ?? null,
+    alt_phone: m.altPhone || null, address: m.address || null, confession_father: m.confessionFather || null,
+    parish: m.parish || null, parent_name: m.parentName || null, parent_phone: m.parentPhone || null,
+    education_level: m.educationLevel || null, spiritual_education: m.spiritualEducation || null,
+    dept1: m.dept1 || null, dept2: m.dept2 || null, dept3: m.dept3 || null,
   };
 }
 function mapRemoteToMember(r) {
@@ -197,6 +202,11 @@ function mapRemoteToMember(r) {
     id: r.id, fullName: r.full_name, phone: r.phone || "", category: r.category || "", grade: r.grade || null,
     qrId: r.qr_id, lastConfessionDate: r.last_confession_date, joinDate: r.join_date,
     active: r.active !== false, callLog: r.call_log || null, callHistory: r.call_history || [], synced: true,
+    christianName: r.christian_name || "", gender: r.gender || "", age: r.age ?? null,
+    altPhone: r.alt_phone || "", address: r.address || "", confessionFather: r.confession_father || "",
+    parish: r.parish || "", parentName: r.parent_name || "", parentPhone: r.parent_phone || "",
+    educationLevel: r.education_level || "", spiritualEducation: r.spiritual_education || "",
+    dept1: r.dept1 || "", dept2: r.dept2 || "", dept3: r.dept3 || "",
   };
 }
 function mapAttendanceToRemote(a, userId) {
@@ -242,7 +252,17 @@ async function syncNow() {
     const settings = await getSettings();
     const since = settings.lastPulledAt || "1970-01-01T00:00:00Z";
     const { data: remoteMembers } = await sbClient.from("members").select("*").gt("updated_at", since);
-    if (remoteMembers) for (const rm of remoteMembers) await put("members", mapRemoteToMember(rm));
+    if (remoteMembers) {
+      for (const rm of remoteMembers) {
+        // Merge into the existing local record instead of replacing it
+        // wholesale — mapRemoteToMember() (or a future column we forget
+        // to map) shouldn't be able to silently wipe local fields it
+        // doesn't know about.
+        const existing = await get("members", rm.id);
+        const mapped = mapRemoteToMember(rm);
+        await put("members", existing ? { ...existing, ...mapped } : mapped);
+      }
+    }
     const { data: remoteAtt } = await sbClient.from("attendance").select("*").gt("updated_at", since);
     if (remoteAtt) for (const ra of remoteAtt) await put("attendance", mapRemoteToAttendance(ra));
     await setSetting("lastPulledAt", new Date().toISOString());
