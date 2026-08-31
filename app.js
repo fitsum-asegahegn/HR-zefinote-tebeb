@@ -83,18 +83,13 @@ async function notifEnable() {
 async function notifDisable() {
   await setSetting("notificationsEnabled", false);
 }
-async function checkAndNotify() {
-  if (!notifIsSupported() || Notification.permission !== "granted") return;
-  if (!(await notifIsEnabled())) return;
-  const settings = await getSettings();
-  const today = todayISO();
-  if (settings.lastNotifiedDate === today) return; // once a day is enough for a local reminder
+async function buildAndFireNotifications() {
+  if (!notifIsSupported() || Notification.permission !== "granted") return false;
   const lang = getLang();
   const [absentees, confessionDue, planDue] = await Promise.all([
     computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(),
   ]);
   const overduePlan = planDue.filter((e) => e.overdue);
-
   let firedAny = false;
   const fire = (tag, body) => {
     try {
@@ -113,8 +108,37 @@ async function checkAndNotify() {
   if (overduePlan.length) {
     fire("finote-plan-overdue", lang === "am" ? `${overduePlan.length} የዘገየ ዕቅድ` : `${overduePlan.length} plan item${overduePlan.length === 1 ? "" : "s"} overdue`);
   }
+  return firedAny;
+}
+
+async function checkAndNotify() {
+  if (!notifIsSupported() || Notification.permission !== "granted") return;
+  if (!(await notifIsEnabled())) return;
+  const settings = await getSettings();
+  const today = todayISO();
+  if (settings.lastNotifiedDate === today) return; // once a day is enough for a local reminder
+  const firedAny = await buildAndFireNotifications();
   if (firedAny) await setSetting("lastNotifiedDate", today);
 }
+
+// Manual trigger for testing against real current data — ignores the
+// once-a-day gate above, since that gate exists to avoid pestering the
+// user during normal use, not to block a deliberate on-demand check.
+window.testNotifyNow = async () => {
+  const lang = getLang();
+  if (!notifIsSupported() || Notification.permission !== "granted") {
+    alert(lang === "am" ? "ማሳወቂያ ገና አልነቃም" : "Notifications aren't enabled yet.");
+    return;
+  }
+  const firedAny = await buildAndFireNotifications();
+  if (firedAny) {
+    await setSetting("lastNotifiedDate", todayISO());
+  } else {
+    alert(lang === "am"
+      ? "በአሁኑ ጊዜ የሚያሳውቅ ነገር የለም — ቀሪ የለም፣ ንስሃ አልደረሰም፣ የዘገየ ዕቅድም የለም"
+      : "Nothing to notify right now — no current absence streaks, confessions due, or overdue plan items.");
+  }
+};
 
 // ---------- Constants ----------
 const DB_NAME = "finote_attendance";
@@ -2422,7 +2446,10 @@ async function renderSettings() {
     <h3 class="section-title">${lang === "am" ? "ማሳወቂያዎች" : "Notifications"}</h3>
     <p class="muted">${lang === "am" ? "በዚህ መሳሪያ ላይ ብቻ የሚታዩ የአካባቢ ማስታወሻዎች ናቸው (ማዕከላዊ push አገልጋይ የለም)።" : "Local reminders shown only on this device — there's no push server behind these."}</p>
     ${notifSupported
-      ? `<div class="toolbar"><button id="notifToggleBtn" class="btn-secondary">${notifOn ? (lang === "am" ? "ማሳወቂያዎችን አጥፋ" : "Disable Reminders") : (lang === "am" ? "ማሳወቂያዎችን አብራ" : "Enable Reminders")}</button></div>`
+      ? `<div class="toolbar">
+           <button id="notifToggleBtn" class="btn-secondary">${notifOn ? (lang === "am" ? "ማሳወቂያዎችን አጥፋ" : "Disable Reminders") : (lang === "am" ? "ማሳወቂያዎችን አብራ" : "Enable Reminders")}</button>
+           ${notifOn ? `<button id="notifTestBtn" class="btn-secondary">${lang === "am" ? "አሁን ሞክር" : "Test Now"}</button>` : ""}
+         </div>`
       : `<p class="muted">${lang === "am" ? "በዚህ መሣሪያ/አሳሽ ማሳወቂያ አይደገፍም" : "Notifications aren't supported on this device/browser."}</p>`}
 
     <h3 class="section-title">${lang === "am" ? "የባዮሜትሪክ መቆለፊያ" : "Biometric Lock"}</h3>
@@ -2463,6 +2490,8 @@ async function renderSettings() {
       renderSettings();
     };
   }
+  const notifTestBtn = el("notifTestBtn");
+  if (notifTestBtn) notifTestBtn.onclick = () => testNotifyNow();
 
   const bioBtn = el("bioToggleBtn");
   if (bioBtn) {
@@ -2540,7 +2569,9 @@ async function boot() {
     await mirrorAuthForSW(session);
     await fetchUserRole(session);
     await fetchDisplayName(session);
-    if (await bioIsEnabled()) { appState = "biolock"; renderBioLock(); return; }
+    if ((await bioIsEnabled()) && sessionStorage.getItem("ftw_bio_unlocked") !== "1") {
+      appState = "biolock"; renderBioLock(); return;
+    }
     await enterApp();
     return;
   }
@@ -2561,6 +2592,7 @@ function renderBioLock() {
   const tryUnlock = async () => {
     const ok = await unlockWithBiometric();
     if (ok) {
+      sessionStorage.setItem("ftw_bio_unlocked", "1");
       enterApp();
     } else {
       const errEl = el("bioLockErr");
