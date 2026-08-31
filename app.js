@@ -746,7 +746,11 @@ function buildDocxTable(headers, rows, widths, cellFillFn) {
       });
     }),
   }));
-  return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, rows: [headerRow, ...bodyRows] });
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    layout: docx.TableLayoutType.FIXED,
+    rows: [headerRow, ...bodyRows],
+  });
 }
 
 // Requires the docx library (docx@8 UMD) to be loaded globally — see index.html.
