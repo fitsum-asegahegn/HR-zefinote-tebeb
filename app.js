@@ -89,19 +89,31 @@ async function checkAndNotify() {
   const settings = await getSettings();
   const today = todayISO();
   if (settings.lastNotifiedDate === today) return; // once a day is enough for a local reminder
+  const lang = getLang();
   const [absentees, confessionDue, planDue] = await Promise.all([
     computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(),
   ]);
   const overduePlan = planDue.filter((e) => e.overdue);
-  const parts = [];
-  if (absentees.length) parts.push(getLang() === "am" ? `${absentees.length} ተከታታይ ቀሪ` : `${absentees.length} to call`);
-  if (confessionDue.length) parts.push(getLang() === "am" ? `${confessionDue.length} ንስሃ ይጠበቃል` : `${confessionDue.length} confession due`);
-  if (overduePlan.length) parts.push(getLang() === "am" ? `${overduePlan.length} የዘገየ ዕቅድ` : `${overduePlan.length} plan item(s) overdue`);
-  if (!parts.length) return;
-  try {
-    new Notification(getLang() === "am" ? "ፍኖተ ጥበብ ማስታወሻ" : "Finote reminder", { body: parts.join(" · "), tag: "finote-daily-reminder" });
-    await setSetting("lastNotifiedDate", today);
-  } catch (e) {}
+
+  let firedAny = false;
+  const fire = (tag, body) => {
+    try {
+      // No explicit `icon` — the browser falls back to the site's favicon,
+      // which is what showed up correctly in the original notifications.
+      new Notification(t("app.title"), { body, tag });
+      firedAny = true;
+    } catch (e) {}
+  };
+  if (absentees.length) {
+    fire("finote-absence-streak", lang === "am" ? `${absentees.length} ተከታታይ ቀሪ` : `${absentees.length} on an absence streak`);
+  }
+  if (confessionDue.length) {
+    fire("finote-confession-due", lang === "am" ? `${confessionDue.length} ንስሃ ይጠበቃል` : `${confessionDue.length} confession${confessionDue.length === 1 ? "" : "s"} due`);
+  }
+  if (overduePlan.length) {
+    fire("finote-plan-overdue", lang === "am" ? `${overduePlan.length} የዘገየ ዕቅድ` : `${overduePlan.length} plan item${overduePlan.length === 1 ? "" : "s"} overdue`);
+  }
+  if (firedAny) await setSetting("lastNotifiedDate", today);
 }
 
 // ---------- Constants ----------
@@ -1900,6 +1912,7 @@ async function renderReports() {
   const memberMap = new Map(members.map((m) => [m.id, m]));
   const progs = PROGRAM_DEFS();
   const lang = getLang();
+  const isAdmin = window.currentUserRole === "admin" || !sbClient;
   const earliestDate = attendance.length ? attendance.reduce((min, a) => (a.sessionDate < min ? a.sessionDate : min), attendance[0].sessionDate) : todayISO();
   const gradeStats = await computeGradeStats(earliestDate, todayISO());
   const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
@@ -1907,6 +1920,7 @@ async function renderReports() {
   el("view").innerHTML = `
     <div class="toolbar"><button id="repExcel" class="btn-secondary">${t("reports.downloadExcel")}</button></div>
 
+    ${isAdmin ? `
     <h3 class="section-title">${lang === "am" ? "የ HR ሪፖርት አመንጭ" : "Generate HR Report"}</h3>
     <div class="toolbar">
       <select id="hrReportPeriod" class="text-input" style="width:auto;flex:1;">
@@ -1919,7 +1933,7 @@ async function renderReports() {
       <button id="hrReportWordBtn" class="btn-secondary">Word</button>
       <button id="hrReportPptxBtn" class="btn-secondary">PowerPoint</button>
       <button id="hrReportBothBtn" class="btn-primary">${lang === "am" ? "ሁለቱንም" : "Both"}</button>
-    </div>
+    </div>` : ""}
 
     <h3 class="section-title">${t("charts.attendanceTrend")}</h3>
     <div class="chart-box"><canvas id="trendChart"></canvas></div>
@@ -1943,15 +1957,17 @@ async function renderReports() {
   el("repExcel").onclick = exportAttendanceExcel;
   drawCharts(attendance, progs, gradeStats);
 
-  const runHrReport = async (which) => {
-    const months = Number(el("hrReportPeriod").value);
-    const data = await computeHrReportData(months);
-    if (which === "word" || which === "both") generateHrReportDoc(data);
-    if (which === "pptx" || which === "both") await generateHrReportPptx(data);
-  };
-  el("hrReportWordBtn").onclick = () => runHrReport("word");
-  el("hrReportPptxBtn").onclick = () => runHrReport("pptx");
-  el("hrReportBothBtn").onclick = () => runHrReport("both");
+  if (isAdmin) {
+    const runHrReport = async (which) => {
+      const months = Number(el("hrReportPeriod").value);
+      const data = await computeHrReportData(months);
+      if (which === "word" || which === "both") generateHrReportDoc(data);
+      if (which === "pptx" || which === "both") await generateHrReportPptx(data);
+    };
+    el("hrReportWordBtn").onclick = () => runHrReport("word");
+    el("hrReportPptxBtn").onclick = () => runHrReport("pptx");
+    el("hrReportBothBtn").onclick = () => runHrReport("both");
+  }
 }
 
 // ---------- Plan ----------
@@ -2538,12 +2554,25 @@ function renderBioLock() {
     <div class="auth-wrap">
       <h2>${t("bio.unlock")}</h2>
       <button id="bioUnlockBtn" class="btn-primary" style="width:100%;margin-bottom:10px;">${t("bio.unlock")}</button>
-      <button id="bioSkipBtn" class="btn-secondary" style="width:100%;">${t("bio.skip")}</button>
+      <p id="bioLockErr" class="muted" style="color:var(--red);min-height:18px;"></p>
+      <button id="bioSignOutBtn" class="btn-secondary" style="width:100%;">${getLang() === "am" ? "ውጣ" : "Sign Out"}</button>
     </div>
   `;
-  const tryUnlock = async () => { const ok = await unlockWithBiometric(); if (ok) enterApp(); };
+  const tryUnlock = async () => {
+    const ok = await unlockWithBiometric();
+    if (ok) {
+      enterApp();
+    } else {
+      const errEl = el("bioLockErr");
+      if (errEl) errEl.textContent = getLang() === "am" ? "አልተሳካም — እንደገና ይሞክሩ" : "Unlock failed — try again";
+    }
+  };
   el("bioUnlockBtn").onclick = tryUnlock;
-  el("bioSkipBtn").onclick = () => enterApp();
+  // No "skip" option here on purpose — that would let anyone bypass the
+  // lock just by tapping past it. Sign Out is the only fallback for a
+  // stuck lock, since it forces real re-authentication with Supabase
+  // rather than silently walking around this screen.
+  el("bioSignOutBtn").onclick = signOut;
   tryUnlock();
 }
 
