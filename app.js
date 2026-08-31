@@ -2256,7 +2256,7 @@ function generatePlanReport(planItems) {
   setTimeout(() => win.print(), 300);
 }
 
-// ---------- Groups: department roster + family structure ----------
+// ---------- Groups tab: card menu -> Departments / Family Structure / Service Attendance / Coming soon ----------
 window.toggleDeptGroup = (i) => {
   const box = el("deptGroup_" + i);
   if (box) box.style.display = box.style.display === "none" ? "block" : "none";
@@ -2275,14 +2275,56 @@ window.editDeptHead = async (encodedDept) => {
   renderGroups();
 };
 
+window._groupsView = window._groupsView || "menu";
+function groupsBackBtn() {
+  const lang = getLang();
+  return `<button class="btn-secondary" onclick="window._groupsView='menu';renderGroups();" style="margin-bottom:14px;">${lang === "am" ? "← ተመለስ" : "← Back"}</button>`;
+}
+
 async function renderGroups() {
+  const view = window._groupsView || "menu";
+  if (view === "departments") return renderGroupsDepartments();
+  if (view === "families") return renderGroupsFamilies();
+  if (view === "serviceAttendance") return renderServiceAttendance();
+  if (view === "comingSoon") return renderGroupsComingSoon();
+  return renderGroupsMenu();
+}
+
+function renderGroupsMenu() {
+  const lang = getLang();
+  const cards = [
+    { view: "departments", icon: "🏢", label: lang === "am" ? "ክፍላት" : "Departments" },
+    { view: "families", icon: "👪", label: lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure" },
+    { view: "serviceAttendance", icon: "📋", label: lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance" },
+    { view: "comingSoon", icon: "✨", label: lang === "am" ? "በቅርቡ ይመጣል..." : "Coming soon..." },
+  ];
+  el("view").innerHTML = `
+    <h3 class="section-title">${lang === "am" ? "ቡድኖች" : "Groups"}</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      ${cards.map((c) => `
+        <div class="list-row" style="flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:26px 10px;cursor:pointer;min-height:110px;${c.view === "comingSoon" ? "opacity:0.55;" : ""}" onclick="window._groupsView='${c.view}';renderGroups();">
+          <div style="font-size:2rem;">${c.icon}</div>
+          <b style="margin-top:8px;">${c.label}</b>
+        </div>`).join("")}
+    </div>
+  `;
+}
+
+function renderGroupsComingSoon() {
+  const lang = getLang();
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
+    <p class="muted">${lang === "am" ? "ገና ምንም አልታቀደም — ወደፊት እዚህ ላይ ይታከላል።" : "Nothing planned here yet — this will be added later."}</p>
+  `;
+}
+
+async function renderGroupsDepartments() {
   const lang = getLang();
   const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
-  const memberMap = new Map(members.map((m) => [m.id, m]));
-  const families = await getAll("families");
   const deptHeads = await getDeptHeads();
 
   el("view").innerHTML = `
+    ${groupsBackBtn()}
     <h3 class="section-title">${lang === "am" ? "በክፍል" : "By Department"}</h3>
     <div class="list">
       ${DEPT_OPTIONS.map((dept, i) => {
@@ -2305,7 +2347,17 @@ async function renderGroups() {
           </div>`;
       }).join("")}
     </div>
+  `;
+}
 
+async function renderGroupsFamilies() {
+  const lang = getLang();
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const families = await getAll("families");
+
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
     <h3 class="section-title">${lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure"}</h3>
     <div class="toolbar">
       <button id="addFamilyBtn" class="btn-primary">${lang === "am" ? "ቤተሰብ ጨምር" : "Add Family"}</button>
@@ -2340,6 +2392,152 @@ async function renderGroups() {
 
   el("addFamilyBtn").onclick = () => openFamilyModal();
   el("exportFamiliesBtn").onclick = () => exportFamiliesExcel(families, memberMap);
+}
+
+// ---------- Service Attendance (የአገልግሎት አቴንዳንስ) ----------
+// Eligibility rule: for a program with N > 0, a member qualifies only if
+// they were present at EVERY one of that program's last N recorded
+// sessions (perfect recent attendance) — and if fewer than N sessions of
+// that program have ever been recorded, nobody can satisfy it yet. N = 0
+// means that program isn't part of the criteria at all. A member must
+// satisfy every program with N > 0 (intersection), and match a selected
+// grade if any grades are checked.
+async function computeServiceAttendanceEligible({ courseN, tselotN, mezmurN, grades }) {
+  const members = (await getAll("members")).filter((m) => m.active !== false);
+  const attendance = await getAll("attendance");
+  const byGrade = grades && grades.length ? members.filter((m) => grades.includes(m.grade)) : members;
+
+  const progReqs = [
+    { key: "timhert", n: courseN },
+    { key: "tselot", n: tselotN },
+    { key: "mezmur", n: mezmurN },
+  ].filter((p) => p.n > 0);
+
+  const sessionDatesCache = {};
+  const lastNDates = (key, n) => {
+    if (!sessionDatesCache[key]) {
+      sessionDatesCache[key] = [...new Set(attendance.filter((a) => a.programKey === key).map((a) => a.sessionDate))].sort().reverse();
+    }
+    return sessionDatesCache[key].slice(0, n);
+  };
+
+  const results = byGrade.filter((mem) => progReqs.every(({ key, n }) => {
+    const dates = lastNDates(key, n);
+    if (dates.length < n) return false;
+    return dates.every((d) => attendance.some((a) => a.memberId === mem.id && a.programKey === key && a.sessionDate === d));
+  }));
+  return results.sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+function ethShortDate(iso) {
+  const d = new Date(iso + "T00:00:00");
+  const eth = gregorianToEthiopian(d);
+  return `${String(eth.day).padStart(2, "0")}/${String(eth.month).padStart(2, "0")}/${eth.year}`;
+}
+
+async function renderServiceAttendance() {
+  const lang = getLang();
+  const state = window._svcAttnState || { courseN: 0, tselotN: 0, mezmurN: 0, grades: [], holiday: "" };
+  window._svcAttnState = state;
+
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
+    <h3 class="section-title">${lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance"}</h3>
+
+    <label>${lang === "am" ? "ትምህርት (Course)" : "Course"}</label>
+    <input id="svc_course" type="number" min="0" class="text-input" value="${state.courseN}">
+
+    <label>${lang === "am" ? "ጸሎት (Tselot)" : "Tselot"}</label>
+    <input id="svc_tselot" type="number" min="0" class="text-input" value="${state.tselotN}">
+
+    <label>${lang === "am" ? "ዝማሬ (Mezmur)" : "Mezmur"}</label>
+    <input id="svc_mezmur" type="number" min="0" class="text-input" value="${state.mezmurN}">
+
+    <label>${lang === "am" ? "ክፍል (ብዙ ምረጫ)" : "Grade (multi-select)"}</label>
+    <div class="toolbar" id="svc_grades">
+      ${Array.from({ length: 12 }, (_, i) => i + 1).map((g) => `
+        <button type="button" class="btn-secondary ${state.grades.includes(g) ? "active-lang" : ""}" data-grade="${g}" style="padding:6px 11px;">${g}</button>
+      `).join("")}
+    </div>
+
+    <label>${lang === "am" ? "የምን አመታዊ በዓል ነው?" : "Which annual holiday is this?"}</label>
+    <input id="svc_holiday" class="text-input" placeholder="${lang === "am" ? "ለምሳሌ የመድኃኔዓለም" : "e.g. Medhanialem"}" value="${state.holiday}">
+
+    <p class="muted" id="svc_count">${lang === "am" ? "መስፈርቶቹን ይሙሉ..." : "Fill in the criteria..."}</p>
+    <button id="svc_generateBtn" class="btn-primary" style="width:100%;" disabled>${lang === "am" ? "ሪፖርት አመንጭ" : "Generate Report"}</button>
+  `;
+
+  const gradeButtons = el("svc_grades").querySelectorAll("[data-grade]");
+  gradeButtons.forEach((btn) => {
+    btn.onclick = () => {
+      const g = Number(btn.dataset.grade);
+      const idx = state.grades.indexOf(g);
+      if (idx === -1) state.grades.push(g); else state.grades.splice(idx, 1);
+      btn.classList.toggle("active-lang");
+      refreshCount();
+    };
+  });
+
+  let eligible = [];
+  const refreshCount = async () => {
+    state.courseN = Number(el("svc_course").value) || 0;
+    state.tselotN = Number(el("svc_tselot").value) || 0;
+    state.mezmurN = Number(el("svc_mezmur").value) || 0;
+    state.holiday = el("svc_holiday").value;
+    eligible = await computeServiceAttendanceEligible({ courseN: state.courseN, tselotN: state.tselotN, mezmurN: state.mezmurN, grades: state.grades });
+    el("svc_count").textContent = lang === "am"
+      ? `በመስፈርቶቹ መሠረት ${eligible.length} ብቁ አባላት አሉ`
+      : `There ${eligible.length === 1 ? "is" : "are"} ${eligible.length} member${eligible.length === 1 ? "" : "s"} eligible according to the criteria you filled`;
+    const genBtn = el("svc_generateBtn");
+    genBtn.disabled = !state.holiday.trim() || eligible.length === 0;
+  };
+
+  el("svc_course").oninput = refreshCount;
+  el("svc_tselot").oninput = refreshCount;
+  el("svc_mezmur").oninput = refreshCount;
+  el("svc_holiday").oninput = refreshCount;
+  el("svc_generateBtn").onclick = () => {
+    if (!eligible.length) return;
+    generateServiceAttendanceReport(eligible, state.holiday.trim());
+  };
+  await refreshCount();
+}
+
+// Two-column, top-to-bottom numbered roster for printing/checking names
+// off at the door. CSS `column-fill: auto` fills column 1 top-to-bottom
+// before starting column 2, and the browser's print pagination continues
+// that same two-column pattern onto further pages automatically once one
+// page's columns are full — no manual per-page row counting needed.
+function generateServiceAttendanceReport(members, holiday) {
+  const lang = getLang();
+  const title = `${holiday} ${lang === "am" ? "አገልግሎት አቴንዳንስ" : "Service Attendance"}`;
+  const dateStr = ethShortDate(todayISO());
+  const rows = members.map((m, i) => `<div class="svc-row">${i + 1}. ${m.fullName}</div>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  body { font-family: 'Noto Sans Ethiopic', Arial, sans-serif; color: #222; margin: 0; padding: 14mm 10mm; position: relative; }
+  .date-stamp { position: absolute; top: 8mm; right: 10mm; font-size: 11px; color: #555; }
+  h1 { font-size: 18px; margin: 0 0 14mm; text-align: center; }
+  .cols { column-count: 2; column-gap: 14mm; column-fill: auto; }
+  .svc-row { break-inside: avoid; font-size: 13px; padding: 3px 0; border-bottom: 1px solid #eee; }
+</style>
+</head><body>
+  <div class="date-stamp">${dateStr}</div>
+  <h1>${title}</h1>
+  <div class="cols">${rows}</div>
+</body></html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert(lang === "am" ? "ብቅ-ባይ ማገጃ እባክዎ ይፍቀዱ" : "Please allow pop-ups to generate the report.");
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 async function exportFamiliesExcel(families, memberMap) {
@@ -2681,6 +2879,7 @@ const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: rende
 function setTab(tabName) {
   if (scanState.streaming) toggleCamera();
   currentTab = tabName;
+  if (tabName === "groups") window._groupsView = "menu";
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabName));
   RENDERERS[tabName]();
 }
