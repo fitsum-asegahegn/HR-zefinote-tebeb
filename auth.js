@@ -132,6 +132,7 @@ async function signOut() {
   if (sbClient) {
     try { await sbClient.auth.signOut(); } catch (e) {}
   }
+  sessionStorage.removeItem("ftw_bio_unlocked");
   boot();
 }
 window.signOut = signOut;
