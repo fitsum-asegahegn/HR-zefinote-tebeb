@@ -83,6 +83,30 @@ async function notifEnable() {
 async function notifDisable() {
   await setSetting("notificationsEnabled", false);
 }
+// Android throws "Illegal constructor" from `new Notification(...)` once a
+// service worker is registered — it requires going through the service
+// worker's registration instead. Desktop/other browsers are usually fine
+// with either, so this tries the service worker path first and falls back.
+async function sendNotification(title, options) {
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg && reg.showNotification) {
+        await reg.showNotification(title, options);
+        return true;
+      }
+    }
+  } catch (e) {
+    // fall through to the direct constructor below
+  }
+  try {
+    new Notification(title, options);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function buildAndFireNotifications() {
   if (!notifIsSupported() || Notification.permission !== "granted") return false;
   const lang = getLang();
@@ -91,22 +115,20 @@ async function buildAndFireNotifications() {
   ]);
   const overduePlan = planDue.filter((e) => e.overdue);
   let firedAny = false;
-  const fire = (tag, body) => {
-    try {
-      // No explicit `icon` — the browser falls back to the site's favicon,
-      // which is what showed up correctly in the original notifications.
-      new Notification(t("app.title"), { body, tag });
-      firedAny = true;
-    } catch (e) {}
+  const fire = async (tag, body) => {
+    // No explicit `icon` — the browser falls back to the site's favicon,
+    // which is what showed up correctly in the original notifications.
+    const ok = await sendNotification(t("app.title"), { body, tag });
+    if (ok) firedAny = true;
   };
   if (absentees.length) {
-    fire("finote-absence-streak", lang === "am" ? `${absentees.length} ተከታታይ ቀሪ` : `${absentees.length} on an absence streak`);
+    await fire("finote-absence-streak", lang === "am" ? `${absentees.length} ተከታታይ ቀሪ` : `${absentees.length} on an absence streak`);
   }
   if (confessionDue.length) {
-    fire("finote-confession-due", lang === "am" ? `${confessionDue.length} ንስሃ ይጠበቃል` : `${confessionDue.length} confession${confessionDue.length === 1 ? "" : "s"} due`);
+    await fire("finote-confession-due", lang === "am" ? `${confessionDue.length} ንስሃ ይጠበቃል` : `${confessionDue.length} confession${confessionDue.length === 1 ? "" : "s"} due`);
   }
   if (overduePlan.length) {
-    fire("finote-plan-overdue", lang === "am" ? `${overduePlan.length} የዘገየ ዕቅድ` : `${overduePlan.length} plan item${overduePlan.length === 1 ? "" : "s"} overdue`);
+    await fire("finote-plan-overdue", lang === "am" ? `${overduePlan.length} የዘገየ ዕቅድ` : `${overduePlan.length} plan item${overduePlan.length === 1 ? "" : "s"} overdue`);
   }
   return firedAny;
 }
