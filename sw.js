@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v39"; 
+const CACHE = "finote-attendance-v40";
 
 const APP_SHELL = [
   "./",
@@ -28,8 +28,18 @@ const RUNTIME_LIBS = [
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(CACHE).then((cache) =>
+      // APP_SHELL is same-origin and small — cache it atomically with
+      // addAll so the core app code is always fully-or-not-at-all cached.
+      // RUNTIME_LIBS are external CDN files (some large) — cache each
+      // independently with .catch() so one flaky/slow fetch can't reject
+      // the whole install and leave the app with NO offline capability
+      // at all. A missing lib just means that one feature (e.g. PPTX
+      // export) shows its own "library not loaded" message until the
+      // next successful online visit re-attempts caching it.
       cache.addAll(APP_SHELL).then(() =>
-        Promise.all(RUNTIME_LIBS.map((u) => cache.add(u)))
+        Promise.all(RUNTIME_LIBS.map((u) => cache.add(u).catch((err) => {
+          console.warn("Runtime lib failed to cache (will retry on next online load):", u, err);
+        })))
       )
     )
   );
