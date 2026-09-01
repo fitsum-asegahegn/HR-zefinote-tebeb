@@ -149,14 +149,14 @@ async function checkAndNotify() {
 window.testNotifyNow = async () => {
   const lang = getLang();
   if (!notifIsSupported() || Notification.permission !== "granted") {
-    alert(lang === "am" ? "ማሳወቂያ ገና አልነቃም" : "Notifications aren't enabled yet.");
+    await showAlert(lang === "am" ? "ማሳወቂያ ገና አልነቃም" : "Notifications aren't enabled yet.");
     return;
   }
   const firedAny = await buildAndFireNotifications();
   if (firedAny) {
     await setSetting("lastNotifiedDate", todayISO());
   } else {
-    alert(lang === "am"
+    await showAlert(lang === "am"
       ? "በአሁኑ ጊዜ የሚያሳውቅ ነገር የለም — ቀሪ የለም፣ ንስሃ አልደረሰም፣ የዘገየ ዕቅድም የለም"
       : "Nothing to notify right now — no current absence streaks, confessions due, or overdue plan items.");
   }
@@ -373,7 +373,7 @@ async function markPlanItemDone(id, note) {
 
 // ---------- Members ----------
 async function importMembersFromWorkbook(file) {
-  if (typeof XLSX === 'undefined') { alert('XLSX library not loaded'); return 0; }
+  if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return 0; }
   const data = await file.arrayBuffer();
   const wb = XLSX.read(data, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -756,7 +756,7 @@ function buildDocxTable(headers, rows, widths, cellFillFn) {
 // Requires the docx library (docx@8 UMD) to be loaded globally — see index.html.
 async function generateHrReportDoc(data) {
   if (typeof docx === "undefined") {
-    alert(getLang() === "am" ? "docx ቤተ-መጻሕፍት አልተጫነም — index.html ውስጥ ያረጋግጡ" : "docx library not loaded — check index.html.");
+    await showAlert(getLang() === "am" ? "docx ቤተ-መጻሕፍት አልተጫነም — index.html ውስጥ ያረጋግጡ" : "docx library not loaded — check index.html.");
     return;
   }
   const lang = getLang();
@@ -826,7 +826,7 @@ async function generateHrReportDoc(data) {
 // support, used here instead of static images so charts stay editable.
 async function generateHrReportPptx(data) {
   if (typeof PptxGenJS === "undefined") {
-    alert(getLang() === "am" ? "PptxGenJS አልተጫነም" : "PptxGenJS library not loaded — add the CDN script tag to index.html.");
+    await showAlert(getLang() === "am" ? "PptxGenJS አልተጫነም" : "PptxGenJS library not loaded — add the CDN script tag to index.html.");
     return;
   }
   const lang = getLang();
@@ -988,7 +988,7 @@ function downloadBlob(blob, filename) {
 }
 
 async function exportAttendanceExcel() {
-  if (typeof XLSX === 'undefined') { alert('XLSX library not loaded'); return; }
+  if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return; }
   const attendance = await getAll("attendance");
   const members = await getAll("members");
   const memberMap = new Map(members.map((m) => [m.id, m]));
@@ -1046,7 +1046,7 @@ async function updateFamily(id, patch) {
   await put("families", fam);
 }
 window.deleteFamily = async (id) => {
-  if (!confirm(getLang() === "am" ? "ይህን ቤተሰብ መሰረዝ ይፈልጋሉ?" : "Delete this family?")) return;
+  if (!(await showConfirm(getLang() === "am" ? "ይህን ቤተሰብ መሰረዝ ይፈልጋሉ?" : "Delete this family?"))) return;
   const row = await get("families", id);
   if (row) await del("families", id);
   if (typeof RENDERERS !== "undefined" && RENDERERS[currentTab]) RENDERERS[currentTab]();
@@ -1075,6 +1075,93 @@ async function computeFamilyMeetingsDue() {
 
 // ---------- UI helpers ----------
 function el(id) { return document.getElementById(id); }
+
+// ---------- In-app dialogs (replace native alert/confirm/prompt) ----------
+// Reuses the existing .modal / .modal-inner / .btn-primary / .btn-secondary
+// classes so these match the rest of the app instead of looking like a
+// browser-native popup. Each returns a Promise so call sites just `await`
+// them where they used to call the native function directly.
+function showAlert(message, opts = {}) {
+  return new Promise((resolve) => {
+    const lang = getLang();
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.innerHTML = `
+      <div class="modal-inner" style="max-width:340px;">
+        ${opts.title ? `<h3>${opts.title}</h3>` : ""}
+        <p style="white-space:pre-wrap;">${message}</p>
+        <button class="btn-primary" id="dlg_ok" style="width:100%;">${lang === "am" ? "እሺ" : "OK"}</button>
+      </div>`;
+    document.body.appendChild(box);
+    const close = () => { box.remove(); resolve(); };
+    box.querySelector("#dlg_ok").onclick = close;
+    box.onclick = (e) => { if (e.target === box) close(); };
+  });
+}
+
+function showConfirm(message, opts = {}) {
+  return new Promise((resolve) => {
+    const lang = getLang();
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.innerHTML = `
+      <div class="modal-inner" style="max-width:340px;">
+        ${opts.title ? `<h3>${opts.title}</h3>` : ""}
+        <p style="white-space:pre-wrap;">${message}</p>
+        <div style="display:flex;gap:10px;margin-top:12px;">
+          <button class="btn-secondary" id="dlg_cancel" style="flex:1;">${opts.cancelLabel || (lang === "am" ? "ይቅር" : "Cancel")}</button>
+          <button class="btn-primary" id="dlg_ok" style="flex:1;${opts.danger ? "background:var(--red);" : ""}">${opts.okLabel || (lang === "am" ? "እሺ" : "OK")}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    const close = (val) => { box.remove(); resolve(val); };
+    box.querySelector("#dlg_ok").onclick = () => close(true);
+    box.querySelector("#dlg_cancel").onclick = () => close(false);
+  });
+}
+
+function showPrompt(message, defaultValue = "", opts = {}) {
+  return new Promise((resolve) => {
+    const lang = getLang();
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.innerHTML = `
+      <div class="modal-inner" style="max-width:360px;text-align:left;">
+        ${opts.title ? `<h3 style="text-align:center;">${opts.title}</h3>` : ""}
+        <p style="text-align:center;">${message}</p>
+        <input id="dlg_input" class="text-input" value="${defaultValue ? String(defaultValue).replace(/"/g, "&quot;") : ""}" placeholder="${opts.placeholder || ""}"/>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button class="btn-secondary" id="dlg_cancel" style="flex:1;">${lang === "am" ? "ይቅር" : "Cancel"}</button>
+          <button class="btn-primary" id="dlg_ok" style="flex:1;">${lang === "am" ? "እሺ" : "OK"}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    const input = box.querySelector("#dlg_input");
+    input.focus();
+    const close = (val) => { box.remove(); resolve(val); };
+    box.querySelector("#dlg_ok").onclick = () => close(input.value);
+    box.querySelector("#dlg_cancel").onclick = () => close(null);
+    input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); close(input.value); } };
+  });
+}
+
+// ---------- Button loading state (for slow actions: report generation, sync) ----------
+// Disables the button and swaps its label while fn() runs, then always
+// restores it — so a slow tap gets visible feedback instead of looking
+// like nothing happened, and can't be double-tapped while in flight.
+async function withButtonLoading(btn, loadingLabel, fn) {
+  if (!btn) return fn();
+  const originalLabel = btn.textContent;
+  const wasDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.textContent = loadingLabel;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = wasDisabled;
+    btn.textContent = originalLabel;
+  }
+}
 
 function applyStaticI18n() {
   el("headerTitle").textContent = t("app.title");
@@ -1137,7 +1224,7 @@ function absenteeRow(a) {
 }
 
 window.callMember = async (memberId) => {
-  const reason = prompt(t("dash.callReasonPrompt")) || "";
+  const reason = (await showPrompt(t("dash.callReasonPrompt"))) || "";
   const m = await get("members", memberId);
   if (!m) return;
   const calledBy = await resolveCallerName();
@@ -1298,7 +1385,7 @@ window.markConfessed = async (memberId) => {
 };
 
 window.doneHrEvent = async (id) => {
-  const note = prompt(t("plan.doneNotePrompt")) || "";
+  const note = (await showPrompt(t("plan.doneNotePrompt"))) || "";
   await markPlanItemDone(id, note);
   renderDashboard();
 };
@@ -1364,7 +1451,7 @@ async function renderScan() {
     const raw = input.value.trim();
     if (!raw) return;
     const ok = await queueScanByQrText(raw);
-    if (!ok) alert(t("scan.codeNotFound"));
+    if (!ok) await showAlert(t("scan.codeNotFound"));
     input.value = "";
     input.focus();
   }
@@ -1452,7 +1539,7 @@ async function toggleCamera() {
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    alert(t("scan.cameraError") + ": " + t("scan.cameraNotSupported"));
+    await showAlert(t("scan.cameraError") + ": " + t("scan.cameraNotSupported"));
     return;
   }
 
@@ -1473,7 +1560,7 @@ async function toggleCamera() {
       torchBtn.style.display = "inline-flex";
     }
   } catch (err) {
-    alert(t("scan.cameraError") + ": " + err.message);
+    await showAlert(t("scan.cameraError") + ": " + err.message);
   }
 }
 
@@ -1609,14 +1696,14 @@ async function renderMembers() {
     const file = e.target.files[0];
     if (!file) return;
     const count = await importMembersFromWorkbook(file);
-    alert(t("members.importedCount", { n: count }));
+    await showAlert(t("members.importedCount", { n: count }));
     renderMembers();
   };
 
   el("addMemberBtn").onclick = () => openRegistrationModal();
   el("printQrBtn").onclick = () => printAllQr(members);
-  el("printSelectedBtn").onclick = () => {
-    if (!selected.size) { alert(t("members.noneSelected")); return; }
+  el("printSelectedBtn").onclick = async () => {
+    if (!selected.size) { await showAlert(t("members.noneSelected")); return; }
     const chosen = members.filter((m) => selected.has(m.id));
     printAllQr(chosen);
   };
@@ -1637,8 +1724,8 @@ async function renderMembers() {
 }
 
 window.deleteMember = async (id) => {
-  if (window.currentUserRole !== "admin" && sbClient) { alert(t("role.adminOnly")); return; }
-  if (!confirm(t("members.confirmDelete"))) return;
+  if (window.currentUserRole !== "admin" && sbClient) { await showAlert(t("role.adminOnly")); return; }
+  if (!(await showConfirm(t("members.confirmDelete")))) return;
   await del("members", id);
   renderMembers();
 };
@@ -1661,7 +1748,7 @@ window.showQr = async (id) => {
     </div>`;
   document.body.appendChild(box);
   if (typeof QRCode === 'undefined') {
-    alert('QRCode library not loaded');
+    await showAlert('QRCode library not loaded');
     return;
   }
   new QRCode(document.getElementById("qrBox"), { text: m.qrId, width: 220, height: 220 });
@@ -1698,7 +1785,7 @@ async function shareQrPng(qrBoxEl, name) {
 }
 
 async function exportMembersExcel(members) {
-  if (typeof XLSX === 'undefined') { alert('XLSX library not loaded'); return; }
+  if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return; }
   const rows = members.map((m) => ({
     "ሙሉ ስም": m.fullName,
     "የክርስትና ስም": m.christianName || "",
@@ -1732,7 +1819,7 @@ async function exportMembersExcel(members) {
 }
 
 async function printAllQr(members) {
-  if (typeof QRCode === 'undefined') { alert('QRCode library not loaded'); return; }
+  if (typeof QRCode === 'undefined') { await showAlert('QRCode library not loaded'); return; }
   const area = el("printArea");
   area.innerHTML = "";
   const perPage = 8;
@@ -1771,12 +1858,15 @@ window.openRegistrationModal = async function(editId) {
       ${deptOptions.map(d => `<option value="${d}" ${d===selected?'selected':''}>${d}</option>`).join('')}
     </select>`;
 
+  const sectionTitle = (text, first) => `<div style="color:var(--amber);font-weight:700;font-size:0.85rem;margin:${first ? "4" : "20"}px 0 8px;${first ? "" : "border-top:1px solid var(--border);padding-top:16px;"}">${text}</div>`;
+
   const box = document.createElement("div");
   box.className = "modal";
   box.innerHTML = `
     <div class="modal-inner" style="max-width:500px;max-height:90vh;overflow-y:auto;text-align:left;">
       <h3>${isEdit ? t("members.editMember") : t("members.addMember")}</h3>
       <form id="regForm">
+        ${sectionTitle(getLang() === "am" ? "የግል መረጃ" : "Personal", true)}
         <label>${t("members.fullName")} *</label>
         <input id="f_fullName" class="text-input" value="${member?.fullName||''}" required>
         <label>${t("members.christianName")}</label>
@@ -1789,26 +1879,34 @@ window.openRegistrationModal = async function(editId) {
         </select>
         <label>${t("members.age")}</label>
         <input id="f_age" type="number" class="text-input" value="${member?.age||''}">
+
+        ${sectionTitle(getLang() === "am" ? "የመገናኛ አድራሻ" : "Contact")}
         <label>${t("members.phone")}</label>
         <input id="f_phone" class="text-input" value="${member?.phone||''}">
         <label>${t("members.altPhone")}</label>
         <input id="f_altPhone" class="text-input" value="${member?.altPhone||''}">
         <label>${t("members.address")}</label>
         <input id="f_address" class="text-input" value="${member?.address||''}">
-        <label>${t("members.confessionFather")}</label>
-        <input id="f_confessionFather" class="text-input" value="${member?.confessionFather||''}">
-        <label>${t("members.parish")}</label>
-        <input id="f_parish" class="text-input" value="${member?.parish||''}">
+
+        ${sectionTitle(getLang() === "am" ? "የቤተሰብ መረጃ" : "Family")}
         <label>${t("members.parentName")}</label>
         <input id="f_parentName" class="text-input" value="${member?.parentName||''}">
         <label>${t("members.parentPhone")}</label>
         <input id="f_parentPhone" class="text-input" value="${member?.parentPhone||''}">
+
+        ${sectionTitle(getLang() === "am" ? "የቤተክርስቲያን መረጃ" : "Church")}
+        <label>${t("members.confessionFather")}</label>
+        <input id="f_confessionFather" class="text-input" value="${member?.confessionFather||''}">
+        <label>${t("members.parish")}</label>
+        <input id="f_parish" class="text-input" value="${member?.parish||''}">
         <label>${t("members.educationLevel")}</label>
         <input id="f_educationLevel" class="text-input" value="${member?.educationLevel||''}">
         <label>${t("members.spiritualEducation")}</label>
         <input id="f_spiritualEducation" class="text-input" value="${member?.spiritualEducation||''}">
         <label>${t("members.grade")}</label>
         <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}">
+
+        ${sectionTitle(getLang() === "am" ? "የክፍል ምደባ" : "Department")}
         <label>${t("members.assignedDept")}</label>
         ${deptSelect('f_assignedDept', member?.category)}
         <label>${t("members.deptPref1")}</label>
@@ -1849,11 +1947,11 @@ window.openRegistrationModal = async function(editId) {
       dept3: el("f_dept3").value,
     };
 
-    if (!data.fullName) { alert(t("members.fullNameRequired")); return; }
+    if (!data.fullName) { await showAlert(t("members.fullNameRequired")); return; }
 
     if (isEdit) {
       const m = await get("members", member.id);
-      if (!m) { alert("Member not found"); return; }
+      if (!m) { await showAlert("Member not found"); return; }
 
       m.fullName = data.fullName;
       m.christianName = data.christianName;
@@ -2114,15 +2212,18 @@ async function renderReports() {
   drawCharts(attendance, progs, gradeStats);
 
   if (isAdmin) {
-    const runHrReport = async (which) => {
-      const months = Number(el("hrReportPeriod").value);
-      const data = await computeHrReportData(months);
-      if (which === "word" || which === "both") await generateHrReportDoc(data);
-      if (which === "pptx" || which === "both") await generateHrReportPptx(data);
+    const runHrReport = async (which, btn) => {
+      const loadingLabel = lang === "am" ? "በማመንጨት ላይ..." : "Generating...";
+      await withButtonLoading(btn, loadingLabel, async () => {
+        const months = Number(el("hrReportPeriod").value);
+        const data = await computeHrReportData(months);
+        if (which === "word" || which === "both") await generateHrReportDoc(data);
+        if (which === "pptx" || which === "both") await generateHrReportPptx(data);
+      });
     };
-    el("hrReportWordBtn").onclick = () => runHrReport("word");
-    el("hrReportPptxBtn").onclick = () => runHrReport("pptx");
-    el("hrReportBothBtn").onclick = () => runHrReport("both");
+    el("hrReportWordBtn").onclick = (e) => runHrReport("word", e.currentTarget);
+    el("hrReportPptxBtn").onclick = (e) => runHrReport("pptx", e.currentTarget);
+    el("hrReportBothBtn").onclick = (e) => runHrReport("both", e.currentTarget);
   }
 }
 
@@ -2162,17 +2263,19 @@ async function renderPlan() {
 
   el("exportPlanBtn").onclick = () => exportPlanExcel(planItems);
   const reportBtn = el("generateReportBtn");
-  if (reportBtn) reportBtn.onclick = () => generatePlanReport(planItems);
+  if (reportBtn) {
+    reportBtn.onclick = () => withButtonLoading(reportBtn, getLang() === "am" ? "በማመንጨት ላይ..." : "Generating...", () => generatePlanReport(planItems));
+  }
 }
 
 window.markPlanDone = async (id) => {
-  const note = prompt(t("plan.doneNotePrompt")) || "";
+  const note = (await showPrompt(t("plan.doneNotePrompt"))) || "";
   await markPlanItemDone(id, note);
   renderPlan();
 };
 
 async function exportPlanExcel(planItems) {
-  if (typeof XLSX === 'undefined') { alert('XLSX library not loaded'); return; }
+  if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return; }
   const rows = planItems.map(p => ({
     "ተ.ቁ": p.no,
     "ንዑስ ክፍል": p.subUnit,
@@ -2196,7 +2299,7 @@ async function exportPlanExcel(planItems) {
 // Admin-only printable summary report — separate from the raw Excel export
 // above. Opens a new tab with a formatted table per category plus a
 // completed/overdue count, then triggers the browser print dialog.
-function generatePlanReport(planItems) {
+async function generatePlanReport(planItems) {
   const today = todayISO();
   const categories = [
     { key: "main", label: t("plan.mainCategory") },
@@ -2247,7 +2350,7 @@ function generatePlanReport(planItems) {
 
   const win = window.open("", "_blank");
   if (!win) {
-    alert(lang === "am" ? "ብቅ-ባይ ማገጃ እባክዎ ይፍቀዱ" : "Please allow pop-ups to generate the report.");
+    await showAlert(lang === "am" ? "ብቅ-ባይ ማገጃ እባክዎ ይፍቀዱ" : "Please allow pop-ups to generate the report.");
     return;
   }
   win.document.write(html);
@@ -2269,7 +2372,7 @@ window.editDeptHead = async (encodedDept) => {
   const dept = decodeURIComponent(encodedDept);
   const lang = getLang();
   const current = (await getDeptHeads())[dept] || "";
-  const name = prompt(lang === "am" ? `የ${dept} ሰብሳቢ ስም` : `Chair's name for ${dept}`, current);
+  const name = await showPrompt(lang === "am" ? `የ${dept} ሰብሳቢ ስም` : `Chair's name for ${dept}`, current);
   if (name === null) return;
   await setDeptHead(dept, name.trim());
   renderGroups();
@@ -2498,7 +2601,8 @@ async function renderServiceAttendance() {
   el("svc_holiday").oninput = refreshCount;
   el("svc_generateBtn").onclick = () => {
     if (!eligible.length) return;
-    generateServiceAttendanceReport(eligible, state.holiday.trim());
+    const btn = el("svc_generateBtn");
+    withButtonLoading(btn, lang === "am" ? "በማመንጨት ላይ..." : "Generating...", () => generateServiceAttendanceReport(eligible, state.holiday.trim()));
   };
   await refreshCount();
 }
@@ -2508,7 +2612,7 @@ async function renderServiceAttendance() {
 // before starting column 2, and the browser's print pagination continues
 // that same two-column pattern onto further pages automatically once one
 // page's columns are full — no manual per-page row counting needed.
-function generateServiceAttendanceReport(members, holiday) {
+async function generateServiceAttendanceReport(members, holiday) {
   const lang = getLang();
   const title = `${holiday} ${lang === "am" ? "አገልግሎት አቴንዳንስ" : "Service Attendance"}`;
   const dateStr = ethShortDate(todayISO());
@@ -2531,7 +2635,7 @@ function generateServiceAttendanceReport(members, holiday) {
 
   const win = window.open("", "_blank");
   if (!win) {
-    alert(lang === "am" ? "ብቅ-ባይ ማገጃ እባክዎ ይፍቀዱ" : "Please allow pop-ups to generate the report.");
+    await showAlert(lang === "am" ? "ብቅ-ባይ ማገጃ እባክዎ ይፍቀዱ" : "Please allow pop-ups to generate the report.");
     return;
   }
   win.document.write(html);
@@ -2541,7 +2645,7 @@ function generateServiceAttendanceReport(members, holiday) {
 }
 
 async function exportFamiliesExcel(families, memberMap) {
-  if (typeof XLSX === "undefined") { alert("XLSX library not loaded"); return; }
+  if (typeof XLSX === "undefined") { await showAlert("XLSX library not loaded"); return; }
   const rows = families.map((f) => {
     const father = f.fatherId ? memberMap.get(f.fatherId) : null;
     const mother = f.motherId ? memberMap.get(f.motherId) : null;
@@ -2745,57 +2849,67 @@ async function renderSettings() {
       ? `<button id="signOutBtn" class="btn-secondary">${lang === "am" ? "ውጣ" : "Sign Out"}</button>`
       : `<p class="muted">${lang === "am" ? "ያለ ደመና ሁነታ እየሰሩ ነው" : "Running without cloud sync"}</p>`}
 
-    <h3 class="section-title">${t("settings.generalTitle")}</h3>
-    <div class="form-grid">
-      <label>${t("settings.defaultStart")}</label>
-      <input id="s_startTime" class="text-input" placeholder="${getLang() === 'am' ? 'ለምሳሌ ከቀኑ 6:00 = 0, 12:00 = 6, ምሽቱ 6:00 = 12 ይተይቡ' : 'e.g. 6AM=0, 12PM=6, 6PM=12'}" value="${displayTime(settings.defaultStartTime)}"/>
-      <label>${t("settings.grace")}</label>
-      <input id="s_grace" type="number" class="text-input" value="${settings.graceMinutes}"/>
-      <label>${t("settings.confessionInterval")}</label>
-      <input id="s_conf" type="number" class="text-input" value="${settings.confessionIntervalMonths}"/>
-      <label>${t("settings.absenceThreshold")}</label>
-      <input id="s_abs" type="number" class="text-input" value="${settings.absenceThreshold}"/>
-      <label>${t("settings.deviceName")}</label>
-      <input id="s_device" class="text-input" value="${settings.deviceName || ""}" placeholder="${t("settings.deviceNamePlaceholder")}"/>
-    </div>
-    <button id="saveSettings" class="btn-primary">${t("settings.save")}</button>
+    <details class="settings-section" open>
+      <summary style="cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;">${t("settings.generalTitle")}</summary>
+      <div class="form-grid">
+        <label>${t("settings.defaultStart")}</label>
+        <input id="s_startTime" class="text-input" placeholder="${getLang() === 'am' ? 'ለምሳሌ ከቀኑ 6:00 = 0, 12:00 = 6, ምሽቱ 6:00 = 12 ይተይቡ' : 'e.g. 6AM=0, 12PM=6, 6PM=12'}" value="${displayTime(settings.defaultStartTime)}"/>
+        <label>${t("settings.grace")}</label>
+        <input id="s_grace" type="number" class="text-input" value="${settings.graceMinutes}"/>
+        <label>${t("settings.confessionInterval")}</label>
+        <input id="s_conf" type="number" class="text-input" value="${settings.confessionIntervalMonths}"/>
+        <label>${t("settings.absenceThreshold")}</label>
+        <input id="s_abs" type="number" class="text-input" value="${settings.absenceThreshold}"/>
+        <label>${t("settings.deviceName")}</label>
+        <input id="s_device" class="text-input" value="${settings.deviceName || ""}" placeholder="${t("settings.deviceNamePlaceholder")}"/>
+      </div>
+      <button id="saveSettings" class="btn-primary">${t("settings.save")}</button>
+    </details>
 
-    <h3 class="section-title">${t("settings.programTimesTitle")}</h3>
-    <div class="list">
-      ${programs.map(p => `
-        <div class="list-row">
-          <div><b>${p.name}</b></div>
-          <div class="row-actions">
-            <input class="text-input small" placeholder="${getLang() === 'am' ? 'ሰዓት' : 'HH:MM'}" id="pt_${p.key}" value="${displayTime(p.startTime)}"/>
-            <input class="text-input small" placeholder="min" id="pg_${p.key}" value="${p.graceMinutes || ''}"/>
-          </div>
-        </div>`).join("")}
-    </div>
-    <button id="saveProgs" class="btn-secondary">${t("settings.saveProgramTimes")}</button>
+    <details class="settings-section">
+      <summary style="cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;">${t("settings.programTimesTitle")}</summary>
+      <div class="list">
+        ${programs.map(p => `
+          <div class="list-row">
+            <div><b>${p.name}</b></div>
+            <div class="row-actions">
+              <input class="text-input small" placeholder="${getLang() === 'am' ? 'ሰዓት' : 'HH:MM'}" id="pt_${p.key}" value="${displayTime(p.startTime)}"/>
+              <input class="text-input small" placeholder="min" id="pg_${p.key}" value="${p.graceMinutes || ''}"/>
+            </div>
+          </div>`).join("")}
+      </div>
+      <button id="saveProgs" class="btn-secondary">${t("settings.saveProgramTimes")}</button>
+    </details>
 
-    <h3 class="section-title">${lang === "am" ? "ማሳወቂያዎች" : "Notifications"}</h3>
-    <p class="muted">${lang === "am" ? "በዚህ መሳሪያ ላይ ብቻ የሚታዩ የአካባቢ ማስታወሻዎች ናቸው (ማዕከላዊ push አገልጋይ የለም)።" : "Local reminders shown only on this device — there's no push server behind these."}</p>
-    ${notifSupported
-      ? `<div class="toolbar">
-           <button id="notifToggleBtn" class="btn-secondary">${notifOn ? (lang === "am" ? "ማሳወቂያዎችን አጥፋ" : "Disable Reminders") : (lang === "am" ? "ማሳወቂያዎችን አብራ" : "Enable Reminders")}</button>
-           ${notifOn ? `<button id="notifTestBtn" class="btn-secondary">${lang === "am" ? "አሁን ሞክር" : "Test Now"}</button>` : ""}
-         </div>`
-      : `<p class="muted">${lang === "am" ? "በዚህ መሣሪያ/አሳሽ ማሳወቂያ አይደገፍም" : "Notifications aren't supported on this device/browser."}</p>`}
+    <details class="settings-section">
+      <summary style="cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;">${lang === "am" ? "ማሳወቂያዎች" : "Notifications"}</summary>
+      <p class="muted">${lang === "am" ? "በዚህ መሳሪያ ላይ ብቻ የሚታዩ የአካባቢ ማስታወሻዎች ናቸው (ማዕከላዊ push አገልጋይ የለም)።" : "Local reminders shown only on this device — there's no push server behind these."}</p>
+      ${notifSupported
+        ? `<div class="toolbar">
+             <button id="notifToggleBtn" class="btn-secondary">${notifOn ? (lang === "am" ? "ማሳወቂያዎችን አጥፋ" : "Disable Reminders") : (lang === "am" ? "ማሳወቂያዎችን አብራ" : "Enable Reminders")}</button>
+             ${notifOn ? `<button id="notifTestBtn" class="btn-secondary">${lang === "am" ? "አሁን ሞክር" : "Test Now"}</button>` : ""}
+           </div>`
+        : `<p class="muted">${lang === "am" ? "በዚህ መሣሪያ/አሳሽ ማሳወቂያ አይደገፍም" : "Notifications aren't supported on this device/browser."}</p>`}
+    </details>
 
-    <h3 class="section-title">${lang === "am" ? "የባዮሜትሪክ መቆለፊያ" : "Biometric Lock"}</h3>
-    <p class="muted">${lang === "am" ? "መተግበሪያውን በሚከፍቱበት ጊዜ በዚህ መሣሪያ ላይ በጣት አሻራ/በፊት ማወቂያ እንዲቆለፍ ያድርጉ።" : "Require this device's fingerprint/face unlock to open the app."}</p>
-    ${bioSupported
-      ? `<div class="toolbar"><button id="bioToggleBtn" class="btn-secondary">${bioOn ? (lang === "am" ? "መቆለፊያውን አጥፋ" : "Disable Lock") : (lang === "am" ? "መቆለፊያውን አብራ" : "Enable Lock")}</button></div>`
-      : `<p class="muted">${lang === "am" ? "በዚህ መሣሪያ ላይ አይደገፍም" : "Not supported on this device."}</p>`}
+    <details class="settings-section">
+      <summary style="cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;">${lang === "am" ? "የባዮሜትሪክ መቆለፊያ" : "Biometric Lock"}</summary>
+      <p class="muted">${lang === "am" ? "መተግበሪያውን በሚከፍቱበት ጊዜ በዚህ መሣሪያ ላይ በጣት አሻራ/በፊት ማወቂያ እንዲቆለፍ ያድርጉ።" : "Require this device's fingerprint/face unlock to open the app."}</p>
+      ${bioSupported
+        ? `<div class="toolbar"><button id="bioToggleBtn" class="btn-secondary">${bioOn ? (lang === "am" ? "መቆለፊያውን አጥፋ" : "Disable Lock") : (lang === "am" ? "መቆለፊያውን አብራ" : "Enable Lock")}</button></div>`
+        : `<p class="muted">${lang === "am" ? "በዚህ መሣሪያ ላይ አይደገፍም" : "Not supported on this device."}</p>`}
+    </details>
 
-    <h3 class="section-title">${t("settings.syncTitle")}</h3>
-    <p class="muted" id="syncStatus">-</p>
-    <div class="toolbar">
-      <button id="syncBtn" class="btn-secondary">${t("settings.syncNow")}</button>
-      <button id="exportJsonBtn" class="btn-secondary">${t("settings.exportJson")}</button>
-      <label class="btn-secondary file-btn">${t("settings.importJson")}<input type="file" id="importJsonInput" accept=".json" style="display:none;"/></label>
-      <button id="exportExcelBtn" class="btn-secondary">${t("settings.exportExcel")}</button>
-    </div>
+    <details class="settings-section" open>
+      <summary style="cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;">${t("settings.syncTitle")}</summary>
+      <p class="muted" id="syncStatus">-</p>
+      <div class="toolbar">
+        <button id="syncBtn" class="btn-secondary">${t("settings.syncNow")}</button>
+        <button id="exportJsonBtn" class="btn-secondary">${t("settings.exportJson")}</button>
+        <label class="btn-secondary file-btn">${t("settings.importJson")}<input type="file" id="importJsonInput" accept=".json" style="display:none;"/></label>
+        <button id="exportExcelBtn" class="btn-secondary">${t("settings.exportExcel")}</button>
+      </div>
+    </details>
   `;
 
   el("langAm").onclick = () => { setLang("am"); applyStaticI18n(); renderSettings(); };
@@ -2814,7 +2928,7 @@ async function renderSettings() {
           await notifEnable();
           checkAndNotify();
         } catch (e) {
-          alert(e.message);
+          await showAlert(e.message);
         }
       }
       renderSettings();
@@ -2832,7 +2946,7 @@ async function renderSettings() {
         try {
           await bioEnable();
         } catch (e) {
-          alert(e.message);
+          await showAlert(e.message);
         }
       }
       renderSettings();
@@ -2847,7 +2961,7 @@ async function renderSettings() {
     await setSetting("confessionIntervalMonths", Number(el("s_conf").value) || 12);
     await setSetting("absenceThreshold", Number(el("s_abs").value) || 3);
     await setSetting("deviceName", el("s_device").value || "");
-    alert(t("settings.saved"));
+    await showAlert(t("settings.saved"));
   };
 
   el("saveProgs").onclick = async () => {
@@ -2858,10 +2972,10 @@ async function renderSettings() {
       p.graceMinutes = el("pg_" + p.key).value || "";
       await put("programs", p);
     }
-    alert(t("settings.saved"));
+    await showAlert(t("settings.saved"));
   };
 
-  el("syncBtn").onclick = syncNow;
+  el("syncBtn").onclick = (e) => withButtonLoading(e.currentTarget, getLang() === "am" ? "በማመሳሰል ላይ..." : "Syncing...", syncNow);
   el("exportJsonBtn").onclick = exportScansJSON;
   el("exportExcelBtn").onclick = exportAttendanceExcel;
 
@@ -2869,7 +2983,7 @@ async function renderSettings() {
     const file = e.target.files[0];
     if (!file) return;
     const { mCount, aCount } = await importScansJSON(file);
-    alert(t("settings.importedJsonResult", { m: mCount, a: aCount }));
+    await showAlert(t("settings.importedJsonResult", { m: mCount, a: aCount }));
   };
 }
 
@@ -2957,13 +3071,39 @@ async function init() {
     await ensurePrograms();
     await ensurePlanItems();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
-    boot();
+    await boot();
   } catch (err) {
     console.error("Init error:", err);
-    el("view").innerHTML = `<div class="auth-wrap"><h2>Error</h2><p>${err.message}</p></div>`;
+    const lang = getLang();
+    el("view").innerHTML = `
+      <div class="auth-wrap">
+        <h2>${lang === "am" ? "የመክፈቻ ስህተት" : "Startup Error"}</h2>
+        <p class="muted">${lang === "am"
+          ? "መተግበሪያውን መክፈት አልተቻለም። ይህ ብዙ ጊዜ የሚከሰተው ገና ሙሉ በሙሉ ሳይጫን መተግበሪያውን ከመስመር ውጭ ሆነው ሲከፍቱ ነው። እባክዎ ኢንተርኔት ካለበት ቦታ አንድ ጊዜ ይክፈቱት፣ ከዚያ ከመስመር ውጭም ይሰራል።"
+          : "The app couldn't start. This usually happens when it's opened offline before it has ever fully loaded once. Please open it with an internet connection at least once — after that it will work offline too."}</p>
+        <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;">${err.message}</p>
+        <button class="btn-primary" onclick="location.reload()">${lang === "am" ? "እንደገና ሞክር" : "Try Again"}</button>
+      </div>`;
   }
 }
 document.addEventListener("DOMContentLoaded", init);
+
+// Last-resort safety net: if something throws after boot (e.g. inside an
+// un-awaited button handler elsewhere in the app) and #view ends up empty
+// as a result, surface a visible way to recover instead of leaving a
+// silent blank screen.
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("Unhandled error:", e.reason);
+  const view = el("view");
+  if (view && !view.innerHTML.trim()) {
+    const lang = getLang();
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <h2>${lang === "am" ? "ችግር ተፈጥሯል" : "Something went wrong"}</h2>
+        <button class="btn-primary" onclick="location.reload()">${lang === "am" ? "እንደገና ሞክር" : "Try Again"}</button>
+      </div>`;
+  }
+});
 
 // ---------- charts.js fallback ----------
 window.FinoteCharts = (function() {
