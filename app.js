@@ -1168,13 +1168,13 @@ function applyStaticI18n() {
   el("headerSub").textContent = t("app.subtitle");
   el("headerMotto").textContent = t("app.motto");
   document.querySelectorAll(".tab-btn").forEach((b) => {
-    if (b.dataset.tab === "groups") return; // no i18n.js entry for this yet — labeled explicitly below
+    if (b.dataset.tab === "more") return; // no i18n.js entry for this yet — labeled explicitly below
     b.querySelector(".lbl").textContent = t("nav." + b.dataset.tab);
   });
-  const groupsBtn = document.querySelector('.tab-btn[data-tab="groups"]');
-  if (groupsBtn) {
-    const lbl = groupsBtn.querySelector(".lbl");
-    if (lbl) lbl.textContent = getLang() === "am" ? "ቡድኖች" : "Groups";
+  const moreBtn = document.querySelector('.tab-btn[data-tab="more"]');
+  if (moreBtn) {
+    const lbl = moreBtn.querySelector(".lbl");
+    if (lbl) lbl.textContent = getLang() === "am" ? "ተጨማሪ" : "More";
   }
   document.documentElement.lang = getLang();
   const langBtn = el("langToggle");
@@ -1316,6 +1316,8 @@ async function renderDashboard() {
     statLabel = t("dash.filteredAbsent");
   }
 
+  const summaryStyle = "cursor:pointer;color:var(--amber);font-family:'Fraunces','Noto Sans Ethiopic',serif;font-size:1rem;margin:22px 0 8px;";
+
   el("view").innerHTML = `
     <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;margin-top:0;">📅 ${ethLabel(today)}</p>
     <div class="stat-grid">
@@ -1325,46 +1327,54 @@ async function renderDashboard() {
       <div class="stat-card"><div class="stat-num">${confessionDue.length}</div><div class="stat-label">${t("dash.confessionDueStat")}</div></div>
     </div>
 
-    <h3 class="section-title">${t("dash.callListTitle", { n: thr })}</h3>
-    <div class="toolbar" style="margin-top:10px;">
-      <label class="muted" style="font-size:0.78rem;">${t("dash.filterLabel")}</label>
-      <select id="absenceFilter" class="text-input" style="width:auto;flex:1;">
-        ${filterOptions.map(o => `<option value="${o.value}" ${o.value===currentFilter?'selected':''}>${o.label}</option>`).join('')}
-      </select>
-    </div>
-    ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
+    <details class="dash-section" open>
+      <summary style="${summaryStyle}">${t("dash.callListTitle", { n: thr })} (${absentees.length})</summary>
+      <div class="toolbar" style="margin-top:10px;">
+        <label class="muted" style="font-size:0.78rem;">${t("dash.filterLabel")}</label>
+        <select id="absenceFilter" class="text-input" style="width:auto;flex:1;">
+          ${filterOptions.map(o => `<option value="${o.value}" ${o.value===currentFilter?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+      </div>
+      ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
+    </details>
 
-    <h3 class="section-title">${t("dash.confessionTitle")}</h3>
-    ${confessionDue.length ? `<div class="list">${confessionDue.map(c => {
-      const fam = childToFamily.get(c.member.id);
-      const contactLine = fam ? familyContactLine(fam) : "";
-      return `
-      <div class="list-row">
-        <div><b>${c.member.fullName}</b><br><span class="muted">${c.monthsSince === null ? t("dash.confessionUnset") : t("dash.confessionMonthsAgo", { n: c.monthsSince })}</span>${contactLine ? `<br><span class="muted">${contactLine}</span>` : ""}</div>
-        <button class="btn-small" onclick="markConfessed('${c.member.id}')">${t("dash.confessDone")}</button>
-      </div>`;
-    }).join("")}</div>` : `<p class="muted">${t("dash.noConfessionDue")}</p>`}
+    <details class="dash-section">
+      <summary style="${summaryStyle}">${t("dash.confessionTitle")} (${confessionDue.length})</summary>
+      ${confessionDue.length ? `<div class="list">${confessionDue.map(c => {
+        const fam = childToFamily.get(c.member.id);
+        const contactLine = fam ? familyContactLine(fam) : "";
+        return `
+        <div class="list-row">
+          <div><b>${c.member.fullName}</b><br><span class="muted">${c.monthsSince === null ? t("dash.confessionUnset") : t("dash.confessionMonthsAgo", { n: c.monthsSince })}</span>${contactLine ? `<br><span class="muted">${contactLine}</span>` : ""}</div>
+          <button class="btn-small" onclick="markConfessed('${c.member.id}')">${t("dash.confessDone")}</button>
+        </div>`;
+      }).join("")}</div>` : `<p class="muted">${t("dash.noConfessionDue")}</p>`}
+    </details>
 
-    <h3 class="section-title">${lang === "am" ? "ወርሃዊ የቤተሰብ ስብሰባ" : "Monthly Family Meetings"}</h3>
-    ${familyMeetingsDue.length ? `<div class="list">${familyMeetingsDue.map(f => {
-      const line = familyContactLine(f);
-      return `
-      <div class="list-row">
-        <div>${line || (lang === "am" ? "(ያልተሟላ ቤተሰብ)" : "(incomplete family)")}</div>
-        <button class="btn-small" onclick="markFamilyMet('${f.id}')">${lang === "am" ? "ተገናኝተዋል" : "Met"}</button>
-      </div>`;
-    }).join("")}</div>` : `<p class="muted">${lang === "am" ? "ሁሉም ቤተሰቦች ተገናኝተዋል" : "All families are up to date"}</p>`}
+    <details class="dash-section" open>
+      <summary style="${summaryStyle}">${(lang === "am" ? "ወርሃዊ የቤተሰብ ስብሰባ" : "Monthly Family Meetings")} (${familyMeetingsDue.length})</summary>
+      ${familyMeetingsDue.length ? `<div class="list">${familyMeetingsDue.map(f => {
+        const line = familyContactLine(f);
+        return `
+        <div class="list-row">
+          <div>${line || (lang === "am" ? "(ያልተሟላ ቤተሰብ)" : "(incomplete family)")}</div>
+          <button class="btn-small" onclick="markFamilyMet('${f.id}')">${lang === "am" ? "ተገናኝተዋል" : "Met"}</button>
+        </div>`;
+      }).join("")}</div>` : `<p class="muted">${lang === "am" ? "ሁሉም ቤተሰቦች ተገናኝተዋል" : "All families are up to date"}</p>`}
+    </details>
 
-    <h3 class="section-title">${t("dash.hrTitle")}</h3>
-    <div class="list">${hrDue.map(e => `
-      <div class="list-row">
-        <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + ethLabel(e.nextDate) + " (" + e.nextDate + ")" : ""}</span></div>
-        <div class="row-actions">
-          ${e.overdue ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
-          <button class="btn-small" onclick="doneHrEvent('${e.id}')">${t("dash.markDone")}</button>
-        </div>
-      </div>`).join("")}</div>
-    <p class="muted" style="margin-top:6px;"><a href="#" onclick="setTab('plan');return false;" style="color:var(--amber);">${t("dash.viewFullPlan")}</a></p>
+    <details class="dash-section">
+      <summary style="${summaryStyle}">${t("dash.hrTitle")} (${hrDue.length})</summary>
+      <div class="list">${hrDue.map(e => `
+        <div class="list-row">
+          <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + ethLabel(e.nextDate) + " (" + e.nextDate + ")" : ""}</span></div>
+          <div class="row-actions">
+            ${e.overdue ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
+            <button class="btn-small" onclick="doneHrEvent('${e.id}')">${t("dash.markDone")}</button>
+          </div>
+        </div>`).join("")}</div>
+      <p class="muted" style="margin-top:6px;"><a href="#" onclick="setTab('plan');return false;" style="color:var(--amber);">${t("dash.viewFullPlan")}</a></p>
+    </details>
   `;
 
   const filterEl = el("absenceFilter");
@@ -2172,6 +2182,7 @@ async function renderReports() {
   const gradeNarrative = buildGradeNarrative(gradeStats.rows, getLang());
 
   el("view").innerHTML = `
+    ${moreBackBtn()}
     <div class="toolbar"><button id="repExcel" class="btn-secondary">${t("reports.downloadExcel")}</button></div>
 
     ${isAdmin ? `
@@ -2235,12 +2246,18 @@ async function renderPlan() {
     { key: "internal", label: t("plan.internalCategory") },
   ];
   const isAdmin = window.currentUserRole === "admin" || !sbClient;
+  const lang = getLang();
 
   el("view").innerHTML = `
     <div class="toolbar">
       <button id="exportPlanBtn" class="btn-secondary">${t("plan.exportExcel")}</button>
-      ${isAdmin ? `<button id="generateReportBtn" class="btn-primary">${getLang() === "am" ? "ሪፖርት አዘጋጅ" : "Generate Report"}</button>` : ""}
+      ${isAdmin ? `<label class="btn-secondary file-btn">${lang === "am" ? "ዕቅድ አስመጣ" : "Import Plan"}<input type="file" id="planImportInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>` : ""}
+      ${isAdmin ? `<button id="generateReportBtn" class="btn-primary">${lang === "am" ? "ሪፖርት አዘጋጅ" : "Generate Report"}</button>` : ""}
     </div>
+    ${isAdmin ? `
+    <div class="toolbar">
+      <button id="resetPlanBtn" class="btn-secondary" style="color:var(--red);border-color:var(--red);">${lang === "am" ? "ወደ መጀመሪያው ዕቅድ መልስ" : "Reset to Original Plan"}</button>
+    </div>` : ""}
 
     ${categories.map(cat => `
       <h3 class="section-title">${cat.label}</h3>
@@ -2254,6 +2271,7 @@ async function renderPlan() {
             </div>
             <div class="row-actions">
               ${p.nextDate && p.nextDate <= todayISO() ? `<span class="badge badge-amber">${t("dash.due")}</span>` : ""}
+              <button class="btn-small" onclick="openPlanItemModal('${p.id}')">${t("members.edit")}</button>
               <button class="btn-small" onclick="markPlanDone('${p.id}')">${t("plan.markDone")}</button>
             </div>
           </div>`).join("")}
@@ -2264,8 +2282,20 @@ async function renderPlan() {
   el("exportPlanBtn").onclick = () => exportPlanExcel(planItems);
   const reportBtn = el("generateReportBtn");
   if (reportBtn) {
-    reportBtn.onclick = () => withButtonLoading(reportBtn, getLang() === "am" ? "በማመንጨት ላይ..." : "Generating...", () => generatePlanReport(planItems));
+    reportBtn.onclick = () => withButtonLoading(reportBtn, lang === "am" ? "በማመንጨት ላይ..." : "Generating...", () => generatePlanReport(planItems));
   }
+  const importInput = el("planImportInput");
+  if (importInput) {
+    importInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const count = await importPlanExcel(file);
+      await showAlert(lang === "am" ? `${count} የዕቅድ ንጥሎች ገብተዋል/ዘምነዋል` : `${count} plan item(s) imported/updated`);
+      renderPlan();
+    };
+  }
+  const resetBtn = el("resetPlanBtn");
+  if (resetBtn) resetBtn.onclick = () => resetPlanToDefault();
 }
 
 window.markPlanDone = async (id) => {
@@ -2274,10 +2304,71 @@ window.markPlanDone = async (id) => {
   renderPlan();
 };
 
+// Edit a plan item's details, including its due date — previously only
+// auto-computed via recurrenceDays when marked done, now directly editable.
+window.openPlanItemModal = async function (id) {
+  const item = await get("planItems", id);
+  if (!item) return;
+  const lang = getLang();
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.innerHTML = `
+    <div class="modal-inner" style="max-width:460px;text-align:left;">
+      <h3>${lang === "am" ? "የዕቅድ ንጥል አርትዕ" : "Edit Plan Item"}</h3>
+      <label>${lang === "am" ? "ንዑስ ክፍል" : "Sub-unit"}</label>
+      <input id="pi_subUnit" class="text-input" value="${item.subUnit || ""}">
+      <label>${lang === "am" ? "ርዕስ" : "Title"}</label>
+      <input id="pi_title" class="text-input" value="${item.title || ""}">
+      <label>${lang === "am" ? "አስፈጻሚ" : "Executor"}</label>
+      <input id="pi_executor" class="text-input" value="${item.executor || ""}">
+      <label>${lang === "am" ? "ዒላማ / ጊዜ" : "Target / Timing"}</label>
+      <input id="pi_metricTarget" class="text-input" value="${item.metricTarget || item.timing || ""}">
+      <label>${lang === "am" ? "የድግግሞሽ ቀናት (0 = በእጅ የሚከታተል)" : "Recurrence days (0 = manual tracking)"}</label>
+      <input id="pi_recurrenceDays" type="number" min="0" class="text-input" value="${item.recurrenceDays || 0}">
+      <label>${lang === "am" ? "ቀጣይ ቀን (ማብቂያ)" : "Next due date"}</label>
+      <input id="pi_nextDate" type="date" class="text-input" value="${item.nextDate || ""}">
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button id="pi_saveBtn" class="btn-primary">${t("members.update")}</button>
+        <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">${t("members.close")}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  el("pi_saveBtn").onclick = async () => {
+    item.subUnit = el("pi_subUnit").value.trim();
+    item.title = el("pi_title").value.trim();
+    item.executor = el("pi_executor").value.trim();
+    item.metricTarget = el("pi_metricTarget").value.trim();
+    item.timing = item.metricTarget;
+    item.recurrenceDays = Number(el("pi_recurrenceDays").value) || 0;
+    item.nextDate = el("pi_nextDate").value || null;
+    await put("planItems", item);
+    box.remove();
+    renderPlan();
+  };
+};
+
+// Wipes all plan items and re-seeds from DEFAULT_PLAN_MAIN/DEFAULT_PLAN_INTERNAL
+// — discards every edit and every "done" history. Admin-only, confirmed.
+window.resetPlanToDefault = async () => {
+  const lang = getLang();
+  const ok = await showConfirm(
+    lang === "am"
+      ? "ይህ ሁሉንም የዕቅድ ንጥሎች ወደ መጀመሪያው ቅንብር ይመልሳል እና ሁሉንም እድገት (የተጠናቀቁ ቀኖች) ያጠፋል። እርግጠኛ ነዎት?"
+      : "This resets every plan item back to its original defaults and erases all progress (done dates). Are you sure?",
+    { danger: true, okLabel: lang === "am" ? "እሺ፣ ዳግም አስጀምር" : "Yes, Reset" }
+  );
+  if (!ok) return;
+  const existing = await getAll("planItems");
+  for (const item of existing) await del("planItems", item.id);
+  await ensurePlanItems();
+  renderPlan();
+};
+
 async function exportPlanExcel(planItems) {
   if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return; }
   const rows = planItems.map(p => ({
     "ተ.ቁ": p.no,
+    "ክፍል (main/internal)": p.category,
     "ንዑስ ክፍል": p.subUnit,
     "ርዕስ": p.title,
     "ዝርዝር": p.details || "",
@@ -2287,6 +2378,7 @@ async function exportPlanExcel(planItems) {
     "ጊዜ": p.timing,
     "አስፈጻሚ": p.executor,
     "በጀት": p.budget || "-",
+    "የድግግሞሽ ቀናት": p.recurrenceDays || 0,
     "ቀጣይ ቀን": p.nextDate || "",
     "የመጨረሻ መከናወን": p.lastDone || "",
   }));
@@ -2294,6 +2386,50 @@ async function exportPlanExcel(planItems) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Plan");
   XLSX.writeFile(wb, `finote-plan-${todayISO()}.xlsx`);
+}
+
+// Upserts by (category + title), matching the same identity key
+// ensurePlanItems() uses — a row whose category+title matches an existing
+// item updates it in place (keeping its doneLog/id); anything unmatched
+// is added as a new item.
+async function importPlanExcel(file) {
+  if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return 0; }
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const existing = await getAll("planItems");
+  let count = 0;
+  for (const row of rows) {
+    const title = String(pick(row, ["ርዕስ", "Title", "title"])).trim();
+    if (!title) continue;
+    const categoryRaw = String(pick(row, ["ክፍል (main/internal)", "ክፍል", "Category", "category"])).trim().toLowerCase();
+    const category = categoryRaw === "internal" ? "internal" : "main";
+    const existingItem = existing.find((p) => p.category === category && p.title === title);
+    const item = existingItem || {
+      id: uid(), category, no: existing.filter((p) => p.category === category).length + 1,
+      details: "", outcome: "", indicator: "", budget: "-", autoMetric: null, lastDone: null, doneLog: [],
+    };
+    item.title = title;
+    item.subUnit = String(pick(row, ["ንዑስ ክፍል", "Sub-unit", "subUnit"])).trim() || item.subUnit || "";
+    item.executor = String(pick(row, ["አስፈጻሚ", "Executor", "executor"])).trim() || item.executor || "";
+    item.metricTarget = String(pick(row, ["ዒላማ", "Target", "metricTarget"])).trim() || item.metricTarget || "";
+    item.timing = String(pick(row, ["ጊዜ", "Timing", "timing"])).trim() || item.metricTarget || item.timing || "";
+    const details = pick(row, ["ዝርዝር", "Details"]); if (details) item.details = String(details).trim();
+    const outcome = pick(row, ["ውጤት", "Outcome"]); if (outcome) item.outcome = String(outcome).trim();
+    const indicator = pick(row, ["መለኪያ", "Indicator"]); if (indicator) item.indicator = String(indicator).trim();
+    const budget = pick(row, ["በጀት", "Budget"]); if (budget) item.budget = String(budget).trim();
+    const recurrenceDays = pick(row, ["የድግግሞሽ ቀናት", "Recurrence Days", "recurrenceDays"]);
+    if (recurrenceDays !== "") item.recurrenceDays = Number(recurrenceDays) || 0;
+    const nextDate = pick(row, ["ቀጣይ ቀን", "Next Date", "nextDate"]);
+    if (nextDate) item.nextDate = parseExcelDate(nextDate) || String(nextDate).trim();
+    const lastDone = pick(row, ["የመጨረሻ መከናወን", "Last Done", "lastDone"]);
+    if (lastDone) item.lastDone = parseExcelDate(lastDone) || String(lastDone).trim();
+    await put("planItems", item);
+    if (!existingItem) existing.push(item);
+    count++;
+  }
+  return count;
 }
 
 // Admin-only printable summary report — separate from the raw Excel export
@@ -2402,6 +2538,7 @@ function renderGroupsMenu() {
     { view: "comingSoon", icon: "✨", label: lang === "am" ? "በቅርቡ ይመጣል..." : "Coming soon..." },
   ];
   el("view").innerHTML = `
+    ${moreBackBtn()}
     <h3 class="section-title">${lang === "am" ? "ቡድኖች" : "Groups"}</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
       ${cards.map((c) => `
@@ -2833,6 +2970,7 @@ async function renderSettings() {
   }
 
   el("view").innerHTML = `
+    ${moreBackBtn()}
     <h3 class="section-title">${t("settings.languageTitle")}</h3>
     <div class="toolbar">
       <button class="btn-secondary ${getLang() === "am" ? "active-lang" : ""}" id="langAm">አማርኛ</button>
@@ -2988,13 +3126,44 @@ async function renderSettings() {
 }
 
 // ---------- Tabs ----------
-const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, groups: renderGroups, settings: renderSettings, reports: renderReports };
+const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, groups: renderGroups, settings: renderSettings, reports: renderReports, more: renderMoreMenu };
+
+// Reports, Groups, and Settings no longer have their own bottom-nav
+// button — they're reached through "More" — so the More tab stays
+// visually active while any of them is open.
+const MORE_SUB_TABS = ["reports", "groups", "settings"];
+function moreBackBtn() {
+  const lang = getLang();
+  return `<button class="btn-secondary" onclick="setTab('more')" style="margin-bottom:14px;">${lang === "am" ? "← ተጨማሪ" : "← More"}</button>`;
+}
+function renderMoreMenu() {
+  const lang = getLang();
+  const items = [
+    { tab: "reports", icon: "📊", label: lang === "am" ? "ሪፖርት" : "Reports" },
+    { tab: "groups", icon: "👪", label: lang === "am" ? "ቡድኖች" : "Groups" },
+    { tab: "settings", icon: "⚙️", label: lang === "am" ? "ቅንብር" : "Settings" },
+  ];
+  el("view").innerHTML = `
+    <h3 class="section-title">${lang === "am" ? "ተጨማሪ" : "More"}</h3>
+    <div class="list">
+      ${items.map((it) => `
+        <div class="list-row" style="cursor:pointer;" onclick="setTab('${it.tab}')">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span style="font-size:1.3rem;">${it.icon}</span>
+            <b>${it.label}</b>
+          </div>
+          <span class="muted">›</span>
+        </div>`).join("")}
+    </div>
+  `;
+}
 
 function setTab(tabName) {
   if (scanState.streaming) toggleCamera();
   currentTab = tabName;
   if (tabName === "groups") window._groupsView = "menu";
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabName));
+  const activeTab = MORE_SUB_TABS.includes(tabName) ? "more" : tabName;
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === activeTab));
   RENDERERS[tabName]();
 }
 window.setTab = setTab;
