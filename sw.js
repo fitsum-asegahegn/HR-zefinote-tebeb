@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v40";
+const CACHE = "finote-attendance-v41";
 
 const APP_SHELL = [
   "./",
