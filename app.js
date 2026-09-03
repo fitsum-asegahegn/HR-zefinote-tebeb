@@ -1278,7 +1278,13 @@ async function renderDashboard() {
     absentees = await computeProgramSpecificAbsences(currentFilter);
   }
 
-  const [confessionDue, hrDue, settings] = await Promise.all([computeConfessionDue(), computePlanReminders(), getSettings()]);
+  const [confessionDue, hrDueAll, settings] = await Promise.all([computeConfessionDue(), computePlanReminders(), getSettings()]);
+  // computePlanReminders() returns every item that has ANY next date set
+  // (used elsewhere too, e.g. notifications, which filter it themselves) —
+  // the dashboard should only surface items actually due now, so marking
+  // one Done (which pushes its next date into the future) makes it
+  // disappear from here, the same way absentee/confession items do.
+  const hrDue = hrDueAll.filter((e) => e.overdue);
   const members = await getAll("members");
   const attendance = await getAll("attendance");
   const today = todayISO();
