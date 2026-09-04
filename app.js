@@ -727,11 +727,23 @@ function planStatusLabel(status, lang) {
   return lang === "am" ? "ትኩረት ይፈልጋል" : "Needs attention";
 }
 
-function buildDocxTable(headers, rows, widths, cellFillFn) {
+// Explicit page-content width in DXA (twentieths of a point) — ~6.5in,
+// safe for both Letter and A4 with standard margins. Percentages alone
+// (no explicit <w:tblGrid> column widths) render fine in Word/LibreOffice
+// but collapse to near-zero width in some lightweight/mobile docx
+// viewers, which apparently need real DXA numbers to size columns.
+const DOCX_TABLE_DXA = 9350;
+
+function buildDocxTable(headers, rows, widthPercents, cellFillFn) {
+  const colWidths = widthPercents
+    ? widthPercents.map((p) => Math.round((p / 100) * DOCX_TABLE_DXA))
+    : null;
+  const cellWidthOpt = (i) => (colWidths ? { size: colWidths[i], type: docx.WidthType.DXA } : undefined);
+
   const headerRow = new docx.TableRow({
     tableHeader: true,
     children: headers.map((h, i) => new docx.TableCell({
-      width: widths ? { size: widths[i], type: docx.WidthType.PERCENTAGE } : undefined,
+      width: cellWidthOpt(i),
       shading: { fill: "F2A33C", type: docx.ShadingType.CLEAR, color: "auto" },
       children: [new docx.Paragraph({ children: [new docx.TextRun({ text: String(h), bold: true, color: "1A1410" })] })],
     })),
@@ -740,14 +752,15 @@ function buildDocxTable(headers, rows, widths, cellFillFn) {
     children: row.map((cell, cIdx) => {
       const fill = cellFillFn ? cellFillFn(rIdx, cIdx) : undefined;
       return new docx.TableCell({
-        width: widths ? { size: widths[cIdx], type: docx.WidthType.PERCENTAGE } : undefined,
+        width: cellWidthOpt(cIdx),
         shading: fill ? { fill, type: docx.ShadingType.CLEAR, color: "auto" } : undefined,
         children: [new docx.Paragraph({ text: String(cell ?? "") })],
       });
     }),
   }));
   return new docx.Table({
-    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    width: { size: DOCX_TABLE_DXA, type: docx.WidthType.DXA },
+    columnWidths: colWidths || undefined,
     layout: docx.TableLayoutType.FIXED,
     rows: [headerRow, ...bodyRows],
   });
