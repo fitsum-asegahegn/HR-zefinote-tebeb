@@ -1,0 +1,166 @@
+const CACHE = "finote-attendance-v38";
+
+const APP_SHELL = [
+  "./",
+  "./index.html",
+  "./app.js",
+  "./i18n.js",
+  "./auth.js",
+  "./config.js",
+  "./ethiopian-calendar.js",
+  "./manifest.json",
+  "./icon-192.png",
+  "./icon-512.png",
+];
+
+const RUNTIME_LIBS = [
+  "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js",
+  "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
+  "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
+  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+  "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js",
+  "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js",
+  "https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js",
+  "https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js",
+];
+
+self.addEventListener("install", (e) => {
+  e.waitUntil(
+    caches.open(CACHE).then((cache) =>
+      // APP_SHELL is same-origin and small — cache it atomically with
+      // addAll so the core app code is always fully-or-not-at-all cached.
+      // RUNTIME_LIBS are external CDN files (some large) — cache each
+      // independently with .catch() so one flaky/slow fetch can't reject
+      // the whole install and leave the app with NO offline capability
+      // at all. A missing lib just means that one feature (e.g. PPTX
+      // export) shows its own "library not loaded" message until the
+      // next successful online visit re-attempts caching it.
+      cache.addAll(APP_SHELL).then(() =>
+        Promise.all(RUNTIME_LIBS.map((u) => cache.add(u).catch((err) => {
+          console.warn("Runtime lib failed to cache (will retry on next online load):", u, err);
+        })))
+      )
+    )
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (e) => {
+  if (e.request.method !== "GET") return;
+  const isNavigation = e.request.mode === "navigate";
+  e.respondWith(
+    caches.match(e.request).then((cached) => {
+      if (cached) {
+        // Stale-while-revalidate: serve the cached copy immediately, but
+        // still refresh the cache in the background for next time.
+        fetch(e.request)
+          .then((netResp) => {
+            if (netResp && netResp.status === 200) {
+              caches.open(CACHE).then((cache) => cache.put(e.request, netResp.clone()));
+            }
+          })
+          .catch(() => {});
+        return cached;
+      }
+      return fetch(e.request)
+        .then((netResp) => {
+          if (netResp && netResp.status === 200) {
+            caches.open(CACHE).then((cache) => cache.put(e.request, netResp.clone()));
+          }
+          return netResp;
+        })
+        .catch(() => {
+          // Nothing cached under this exact request, and the network is
+          // unreachable. For a page navigation specifically, fall back to
+          // the cached app shell itself rather than letting the browser
+          // show its own generic "you're offline" page — that way our own
+          // JS still boots (and can show a proper in-app message) as long
+          // as the shell was cached at all. This can't help if the app has
+          // literally never loaded successfully while online even once —
+          // there's nothing to fall back to in that case.
+          if (isNavigation) {
+            return caches.match("./index.html").then((shell) => shell || caches.match("./"));
+          }
+        });
+    })
+  );
+});
+
+/* ---------- Background Sync (best-effort) ---------- */
+const SW_DB_NAME = "finote_attendance";
+function swOpenDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SW_DB_NAME);
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function swGetAll(db, store) {
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(store, "readonly").objectStore(store).getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+function swPut(db, store, val) {
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(store, "readwrite").objectStore(store).put(val);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function swSettingsMap(db) {
+  const rows = await swGetAll(db, "settings");
+  const m = {};
+  rows.forEach((r) => (m[r.key] = r.value));
+  return m;
+}
+
+async function backgroundSyncAttendance() {
+  try {
+    const db = await swOpenDB();
+    const settings = await swSettingsMap(db);
+    const url = settings.sbUrlMirror, key = settings.sbKeyMirror, token = settings.sbAccessTokenMirror;
+    if (!url || !key || !token) return;
+
+    const attendance = await swGetAll(db, "attendance");
+    const pending = attendance.filter((a) => !a.synced);
+    if (pending.length) {
+      const body = pending.map((a) => ({
+        id: a.id, member_id: a.memberId, program_key: a.programKey, session_date: a.sessionDate,
+        ts: a.timestamp, status: a.status, device_id: a.deviceId,
+      }));
+      const resp = await fetch(url + "/rest/v1/attendance?on_conflict=member_id,session_date,program_key", {
+        method: "POST",
+        headers: {
+          apikey: key,
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        for (const a of pending) { a.synced = true; await swPut(db, "attendance", a); }
+      }
+    }
+  } catch (e) {
+    // best-effort
+  }
+}
+
+self.addEventListener("sync", (e) => {
+  if (e.tag === "sync-attendance") {
+    e.waitUntil(backgroundSyncAttendance());
+  }
+});
