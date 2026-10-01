@@ -28,6 +28,9 @@
 --   alter table members add column if not exists dept2 text;
 --   alter table members add column if not exists dept3 text;
 --
+-- If you're picking up member photos (ID card photo), run:
+--   alter table members add column if not exists photo text;
+--
 -- If you're picking up the family-structure + department-chair sync,
 -- just run the "families" and "dept_heads" table blocks below (search
 -- for "families" / "dept_heads") — everything else can be skipped.
@@ -35,6 +38,15 @@
 -- If you're adding the display-name feature to an existing project,
 -- just run the "profiles" table block below (search for "profiles") —
 -- everything else can be skipped.
+--
+-- If you're picking up roles & permissions (pending / scanner / member /
+-- admin), run ONLY supabase-permissions-migration.sql from this folder.
+--
+-- If you're picking up synced deletes (soft-delete tombstones), run
+-- ONLY this migration (the last block of this file, "Synced deletes"):
+--   alter table members add column if not exists deleted_at timestamptz;
+--   alter table families add column if not exists deleted_at timestamptz;
+--   ...then the guard_deleted_at() function + two triggers at the bottom.
 
 create table if not exists members (
   id uuid primary key,
@@ -62,6 +74,8 @@ create table if not exists members (
   dept1 text,
   dept2 text,
   dept3 text,
+  photo text, -- small compressed JPEG data URL (see resizeImageFile in app.js)
+  deleted_at timestamptz, -- soft-delete tombstone; see "Synced deletes" below
   updated_at timestamptz default now()
 );
 
@@ -101,6 +115,7 @@ create table if not exists families (
   address_code text,
   last_meeting_date date,
   meeting_log jsonb default '[]'::jsonb, -- append-only log of monthly family-meeting check-ins
+  deleted_at timestamptz, -- soft-delete tombstone; see "Synced deletes" below
   updated_at timestamptz default now()
 );
 
@@ -113,18 +128,19 @@ create table if not exists dept_heads (
   updated_at timestamptz default now()
 );
 
--- Role-based access control: every signed-up user is 'member' by default;
--- promote someone to 'admin' manually in the Table Editor (or via SQL:
--- update user_roles set role='admin' where user_id='...').
+-- Role-based access control: every signed-up user starts as 'pending' (no
+-- access) until an admin approves them in the app (More -> Users). The very
+-- first admin has to be set by hand: sign up, then in the SQL Editor run
+-- update user_roles set role='admin' where user_id='...'.
 create table if not exists user_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  role text not null default 'member' check (role in ('admin','member')),
+  role text not null default 'pending' check (role in ('pending','scanner','member','admin')),
   updated_at timestamptz default now()
 );
 
 create or replace function handle_new_user() returns trigger as $$
 begin
-  insert into public.user_roles (user_id, role) values (new.id, 'member');
+  insert into public.user_roles (user_id, role) values (new.id, 'pending');
   return new;
 end;
 $$ language plpgsql security definer;
@@ -139,12 +155,13 @@ create trigger on_auth_user_created
 create table if not exists profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
+  email text,
   updated_at timestamptz default now()
 );
 
 create or replace function handle_new_user_profile() returns trigger as $$
 begin
-  insert into public.profiles (user_id, display_name) values (new.id, split_part(new.email, '@', 1));
+  insert into public.profiles (user_id, display_name, email) values (new.id, split_part(new.email, '@', 1), new.email);
   return new;
 end;
 $$ language plpgsql security definer;
@@ -186,9 +203,9 @@ drop trigger if exists trg_depthead_updated on dept_heads;
 create trigger trg_depthead_updated before update on dept_heads
   for each row execute procedure set_updated_at();
 
--- RLS: any signed-in HR team member can read/write members & attendance.
--- Deleting members is admin-only (enforced both here and, defensively, in
--- the app UI which hides the delete button for non-admins).
+-- RLS: access depends on the user's role (see app_role() and the policies
+-- below). Deleting is admin-only (enforced here, and the app UI hides the
+-- delete buttons for everyone else).
 alter table members enable row level security;
 alter table attendance enable row level security;
 alter table hr_events enable row level security;
@@ -203,65 +220,121 @@ create or replace function is_admin() returns boolean as $$
   );
 $$ language sql security definer stable;
 
-create policy "authenticated read members" on members
-  for select using (auth.role() = 'authenticated');
-create policy "authenticated insert members" on members
-  for insert with check (auth.role() = 'authenticated');
-create policy "authenticated update members" on members
-  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+-- Which role is the signed-in user? (null if they have no user_roles row,
+-- which makes every policy below deny them.) security definer so it can read
+-- user_roles regardless of that table's own RLS.
+create or replace function app_role() returns text as $$
+  select role from user_roles where user_id = auth.uid();
+$$ language sql security definer stable;
+
+-- Roles: pending (new sign-up, no access) | scanner (attendance only,
+-- member names readable) | member (day-to-day HR work) | admin.
+-- Admin-only: deleting (soft-delete trigger below), changing roles.
+-- Everything is enforced here, not just hidden in the UI.
+
+-- members: scanners can READ (they need names/QR to take attendance) but not write.
+create policy "role read members" on members
+  for select using (app_role() in ('scanner','member','admin'));
+create policy "role insert members" on members
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update members" on members
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
 create policy "admin delete members" on members
   for delete using (is_admin());
 
-create policy "authenticated read attendance" on attendance
-  for select using (auth.role() = 'authenticated');
-create policy "authenticated insert attendance" on attendance
-  for insert with check (auth.role() = 'authenticated');
-create policy "authenticated update attendance" on attendance
-  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+-- attendance: the one table scanners can write.
+create policy "role read attendance" on attendance
+  for select using (app_role() in ('scanner','member','admin'));
+create policy "role insert attendance" on attendance
+  for insert with check (app_role() in ('scanner','member','admin'));
+create policy "role update attendance" on attendance
+  for update using (app_role() in ('scanner','member','admin')) with check (app_role() in ('scanner','member','admin'));
 create policy "admin delete attendance" on attendance
   for delete using (is_admin());
 
-create policy "authenticated full access hr_events" on hr_events
-  for select using (auth.role() = 'authenticated');
-create policy "authenticated write hr_events" on hr_events
-  for insert with check (auth.role() = 'authenticated');
-create policy "authenticated update hr_events" on hr_events
-  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "role read hr_events" on hr_events
+  for select using (app_role() in ('member','admin'));
+create policy "role insert hr_events" on hr_events
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update hr_events" on hr_events
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
 create policy "admin delete hr_events" on hr_events
   for delete using (is_admin());
 
--- Families: same shape as members — anyone signed in can read/write,
--- only admins can delete. The app currently only deletes families
--- locally (never pushes a remote delete), but the policy is here for
--- when/if that's added.
-create policy "authenticated read families" on families
-  for select using (auth.role() = 'authenticated');
-create policy "authenticated insert families" on families
-  for insert with check (auth.role() = 'authenticated');
-create policy "authenticated update families" on families
-  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+-- Families: members and admins only (scanners never see them). Deletes from
+-- the app are soft-deletes guarded by the trigger in "Synced deletes" below;
+-- the hard-delete policy is for manual cleanup in the dashboard.
+create policy "role read families" on families
+  for select using (app_role() in ('member','admin'));
+create policy "role insert families" on families
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update families" on families
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
 create policy "admin delete families" on families
   for delete using (is_admin());
 
--- Department chairs: anyone signed in can read/write. No delete policy —
--- the app never removes a department row, only updates head_name.
-create policy "authenticated read dept_heads" on dept_heads
-  for select using (auth.role() = 'authenticated');
-create policy "authenticated insert dept_heads" on dept_heads
-  for insert with check (auth.role() = 'authenticated');
-create policy "authenticated update dept_heads" on dept_heads
-  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+-- Department chairs: members and admins. No delete policy — the app never
+-- removes a department row, only updates head_name.
+create policy "role read dept_heads" on dept_heads
+  for select using (app_role() in ('member','admin'));
+create policy "role insert dept_heads" on dept_heads
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update dept_heads" on dept_heads
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
 
+-- Everyone can read their OWN role (a pending user needs to learn they were
+-- approved); admins can read everyone's and change roles. Nobody else can
+-- touch this table, so no one can grant themselves a role.
 create policy "read own role" on user_roles
   for select using (auth.uid() = user_id);
+create policy "admin read roles" on user_roles
+  for select using (is_admin());
 create policy "admin manage roles" on user_roles
   for update using (is_admin()) with check (is_admin());
 
--- Everyone can see everyone's display name (needed so "called by" shows
--- correctly to other HR members); each person can only edit their own.
-create policy "authenticated read profiles" on profiles
-  for select using (auth.role() = 'authenticated');
+-- Display names/emails: visible to approved users (so "called by" shows
+-- correctly and admins can see who is waiting); you can always see and edit
+-- your own row. Still a separate table from user_roles on purpose.
+create policy "role read profiles" on profiles
+  for select using (auth.uid() = user_id or app_role() in ('scanner','member','admin'));
 create policy "user manage own profile" on profiles
   for insert with check (auth.uid() = user_id);
 create policy "user update own profile" on profiles
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------
+-- Synced deletes (soft-delete tombstones)
+-- ---------------------------------------------------------------------
+-- The app never hard-DELETEs members/families remotely. Deleting sets
+-- deleted_at, which bumps updated_at (via the triggers above) so every
+-- other device picks it up on its next incremental pull and removes the
+-- record locally; a fresh install pulls the tombstone too and skips the
+-- row instead of resurrecting it.
+--
+-- Because a soft-delete is an UPDATE (which the member/admin update
+-- policies allow), this trigger is what keeps
+-- deleting admin-only at the database level, not just in the UI.
+-- An admin can "undelete" by setting deleted_at back to null.
+alter table members add column if not exists deleted_at timestamptz;
+alter table families add column if not exists deleted_at timestamptz;
+
+create or replace function guard_deleted_at() returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.deleted_at is not null and not is_admin() then
+      raise exception 'only admins can delete records';
+    end if;
+  elsif new.deleted_at is distinct from old.deleted_at and not is_admin() then
+    raise exception 'only admins can delete records';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_members_guard_deleted on members;
+create trigger trg_members_guard_deleted before insert or update on members
+  for each row execute procedure guard_deleted_at();
+
+drop trigger if exists trg_families_guard_deleted on families;
+create trigger trg_families_guard_deleted before insert or update on families
+  for each row execute procedure guard_deleted_at();
