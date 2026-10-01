@@ -125,7 +125,7 @@ function renderOfflineNoSession() {
     </div>
   `;
   el("o_retry").onclick = () => boot();
-  el("o_skip").onclick = () => enterApp();
+  el("o_skip").onclick = () => { window.currentUserRole = "member"; enterApp(); };
 }
 
 async function signOut() {
@@ -150,14 +150,25 @@ async function mirrorAuthForSW(session) {
 }
 
 // ---------- Role-based access control (client-side reflection of DB role) ----------
-window.currentUserRole = "member";
+// Roles: pending (just signed up, no access) < scanner (attendance only,
+// names visible) < member (day-to-day HR work) < admin. Real enforcement is
+// the RLS policies in supabase-schema.sql; this only drives the UI.
+const ROLE_NAMES = ["pending", "scanner", "member", "admin"];
+window.currentUserRole = "pending";
 async function fetchUserRole(session) {
-  if (!sbClient || !session) { window.currentUserRole = "member"; return; }
+  if (!sbClient || !session) { window.currentUserRole = "pending"; return; }
+  const cacheKey = "ftw_role_" + session.user.id;
   try {
-    const { data } = await sbClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
-    window.currentUserRole = (data && data.role) || "member";
+    const { data, error } = await sbClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+    if (error) throw error;
+    const role = data && ROLE_NAMES.includes(data.role) ? data.role : "pending";
+    window.currentUserRole = role;
+    try { localStorage.setItem(cacheKey, role); } catch (e) {}
   } catch (e) {
-    window.currentUserRole = "member"; // fail-safe: never assume admin
+    // Couldn't reach the server (e.g. offline): reuse the last role this
+    // device saw for this user; if there never was one, least privilege.
+    const cached = localStorage.getItem(cacheKey);
+    window.currentUserRole = ROLE_NAMES.includes(cached) ? cached : "pending";
   }
 }
 
@@ -248,28 +259,44 @@ async function syncNow() {
   const session = await getSession();
   if (!session) { setStatus(t("sync.notSignedIn")); return; }
 
+  // Re-check the role on every sync so a promotion/demotion takes effect
+  // without waiting for the next sign-in.
+  const roleBefore = window.currentUserRole;
+  await fetchUserRole(session);
+  const role = window.currentUserRole;
+  if (role !== roleBefore && typeof onRoleChanged === "function") onRoleChanged();
+  if (role === "pending") {
+    setStatus(getLang() === "am" ? "የአስተዳዳሪ ፈቃድ በመጠበቅ ላይ" : "Waiting for admin approval");
+    return;
+  }
+  // scanners only record attendance (and read member names); the DB
+  // rejects their writes to everything else, so don't even try.
+  const canWrite = role === "member" || role === "admin";
+
   setStatus(t("sync.working"));
   try {
-    // push deletes first. Deleting is a soft-delete on the server
-    // (deleted_at set) rather than a hard DELETE, so every other device
-    // can learn about it through the normal incremental pull below, and a
-    // fresh install can't resurrect the record. Only admins can set
-    // deleted_at (enforced by a DB trigger, see supabase-schema.sql).
-    const pendingTombs = (await getAll("tombstones")).filter((x) => !x.synced);
-    for (const tomb of pendingTombs) {
-      const { error } = await sbClient.from(tomb.table)
-        .update({ deleted_at: tomb.deletedAt }).eq("id", tomb.recordId);
-      if (!error) { tomb.synced = true; await put("tombstones", tomb); }
-    }
+    if (canWrite) {
+      // push deletes first. Deleting is a soft-delete on the server
+      // (deleted_at set) rather than a hard DELETE, so every other device
+      // can learn about it through the normal incremental pull below, and a
+      // fresh install can't resurrect the record. Only admins can set
+      // deleted_at (enforced by a DB trigger, see supabase-schema.sql).
+      const pendingTombs = (await getAll("tombstones")).filter((x) => !x.synced);
+      for (const tomb of pendingTombs) {
+        const { error } = await sbClient.from(tomb.table)
+          .update({ deleted_at: tomb.deletedAt }).eq("id", tomb.recordId);
+        if (!error) { tomb.synced = true; await put("tombstones", tomb); }
+      }
 
-    // push members
-    const members = await getAll("members");
-    const pendingMembers = members.filter((m) => !m.synced);
-    if (pendingMembers.length) {
-      const { error } = await sbClient.from("members").upsert(pendingMembers.map(mapMemberToRemote));
-      if (!error) for (const m of pendingMembers) { m.synced = true; await put("members", m); }
+      // push members
+      const members = await getAll("members");
+      const pendingMembers = members.filter((m) => !m.synced);
+      if (pendingMembers.length) {
+        const { error } = await sbClient.from("members").upsert(pendingMembers.map(mapMemberToRemote));
+        if (!error) for (const m of pendingMembers) { m.synced = true; await put("members", m); }
+      }
     }
-    // push attendance
+    // push attendance (all roles)
     const attendance = await getAll("attendance");
     const pendingAtt = attendance.filter((a) => !a.synced);
     if (pendingAtt.length) {
@@ -277,28 +304,30 @@ async function syncNow() {
         .upsert(pendingAtt.map((a) => mapAttendanceToRemote(a, session.user.id)), { onConflict: "member_id,session_date,program_key" });
       if (!error) for (const a of pendingAtt) { a.synced = true; await put("attendance", a); }
     }
-    // push families
-    const families = await getAll("families");
-    const pendingFamilies = families.filter((f) => !f.synced);
-    if (pendingFamilies.length) {
-      const { error } = await sbClient.from("families").upsert(pendingFamilies.map(mapFamilyToRemote));
-      if (!error) for (const f of pendingFamilies) { f.synced = true; await put("families", f); }
-    }
-    // push + pull department chairs — small table, always synced in full
-    // rather than tracked with a per-key dirty flag (see getDeptHeads/setDeptHead in app.js)
-    const deptHeads = await getDeptHeads();
-    const deptHeadRows = Object.entries(deptHeads).map(([dept, head_name]) => ({ dept, head_name }));
-    if (deptHeadRows.length) {
-      await sbClient.from("dept_heads").upsert(deptHeadRows);
-    }
-    const { data: remoteDeptHeads } = await sbClient.from("dept_heads").select("*");
-    if (remoteDeptHeads) {
-      const mergedHeads = { ...deptHeads };
-      remoteDeptHeads.forEach((r) => { mergedHeads[r.dept] = r.head_name; });
-      await setSetting("deptHeads", mergedHeads);
+    if (canWrite) {
+      // push families
+      const families = await getAll("families");
+      const pendingFamilies = families.filter((f) => !f.synced);
+      if (pendingFamilies.length) {
+        const { error } = await sbClient.from("families").upsert(pendingFamilies.map(mapFamilyToRemote));
+        if (!error) for (const f of pendingFamilies) { f.synced = true; await put("families", f); }
+      }
+      // push + pull department chairs — small table, always synced in full
+      // rather than tracked with a per-key dirty flag (see getDeptHeads/setDeptHead in app.js)
+      const deptHeads = await getDeptHeads();
+      const deptHeadRows = Object.entries(deptHeads).map(([dept, head_name]) => ({ dept, head_name }));
+      if (deptHeadRows.length) {
+        await sbClient.from("dept_heads").upsert(deptHeadRows);
+      }
+      const { data: remoteDeptHeads } = await sbClient.from("dept_heads").select("*");
+      if (remoteDeptHeads) {
+        const mergedHeads = { ...deptHeads };
+        remoteDeptHeads.forEach((r) => { mergedHeads[r.dept] = r.head_name; });
+        await setSetting("deptHeads", mergedHeads);
+      }
     }
 
-    // pull remote changes
+    // pull remote changes (members + attendance for every role)
     const settings = await getSettings();
     const since = settings.lastPulledAt || "1970-01-01T00:00:00Z";
     const { data: remoteMembers } = await sbClient.from("members").select("*").gt("updated_at", since);
@@ -318,16 +347,24 @@ async function syncNow() {
     }
     const { data: remoteAtt } = await sbClient.from("attendance").select("*").gt("updated_at", since);
     if (remoteAtt) for (const ra of remoteAtt) await put("attendance", mapRemoteToAttendance(ra));
-    const { data: remoteFamilies } = await sbClient.from("families").select("*").gt("updated_at", since);
-    if (remoteFamilies) {
-      for (const rf of remoteFamilies) {
-        if (rf.deleted_at) { await del("families", rf.id); continue; }
-        const existing = await get("families", rf.id);
-        const mapped = mapRemoteToFamily(rf);
-        await put("families", existing ? { ...existing, ...mapped } : mapped);
+    const pullStartedAt = new Date().toISOString();
+    if (canWrite) {
+      // Families have their own watermark: a scanner never pulls them, so
+      // if that person is later promoted to member they must still get the
+      // full history instead of only changes since the shared timestamp.
+      const sinceFam = settings.lastPulledFamiliesAt || "1970-01-01T00:00:00Z";
+      const { data: remoteFamilies } = await sbClient.from("families").select("*").gt("updated_at", sinceFam);
+      if (remoteFamilies) {
+        for (const rf of remoteFamilies) {
+          if (rf.deleted_at) { await del("families", rf.id); continue; }
+          const existing = await get("families", rf.id);
+          const mapped = mapRemoteToFamily(rf);
+          await put("families", existing ? { ...existing, ...mapped } : mapped);
+        }
       }
+      await setSetting("lastPulledFamiliesAt", pullStartedAt);
     }
-    await setSetting("lastPulledAt", new Date().toISOString());
+    await setSetting("lastPulledAt", pullStartedAt);
     setStatus(t("sync.done"));
   } catch (err) {
     setStatus(t("sync.error"));
