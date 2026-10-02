@@ -250,6 +250,19 @@ function mapRemoteToFamily(r) {
   };
 }
 
+function mapExcuseToRemote(e) {
+  return {
+    id: e.id, member_id: e.memberId, start_date: e.startDate, end_date: e.endDate,
+    reason: e.reason || null, program_keys: e.programKeys || [], created_by_name: e.createdBy || null,
+  };
+}
+function mapRemoteToExcuse(r) {
+  return {
+    id: r.id, memberId: r.member_id, startDate: r.start_date, endDate: r.end_date,
+    reason: r.reason || "", programKeys: r.program_keys || [], createdBy: r.created_by_name || "", synced: true,
+  };
+}
+
 async function syncNow() {
   const statusEl = el("syncStatus");
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
@@ -294,6 +307,13 @@ async function syncNow() {
       if (pendingMembers.length) {
         const { error } = await sbClient.from("members").upsert(pendingMembers.map(mapMemberToRemote));
         if (!error) for (const m of pendingMembers) { m.synced = true; await put("members", m); }
+      }
+      // push permissions (after members, since each references a member)
+      const excuses = await getAll("excuses");
+      const pendingExcuses = excuses.filter((x) => !x.synced);
+      if (pendingExcuses.length) {
+        const { error } = await sbClient.from("excuses").upsert(pendingExcuses.map(mapExcuseToRemote));
+        if (!error) for (const x of pendingExcuses) { x.synced = true; await put("excuses", x); }
       }
     }
     // push attendance (all roles)
@@ -363,6 +383,19 @@ async function syncNow() {
         }
       }
       await setSetting("lastPulledFamiliesAt", pullStartedAt);
+
+      // permissions: own watermark for the same reason as families
+      const sinceEx = settings.lastPulledExcusesAt || "1970-01-01T00:00:00Z";
+      const { data: remoteExcuses } = await sbClient.from("excuses").select("*").gt("updated_at", sinceEx);
+      if (remoteExcuses) {
+        for (const rx of remoteExcuses) {
+          if (rx.deleted_at) { await del("excuses", rx.id); continue; }
+          const existing = await get("excuses", rx.id);
+          const mapped = mapRemoteToExcuse(rx);
+          await put("excuses", existing ? { ...existing, ...mapped } : mapped);
+        }
+        await setSetting("lastPulledExcusesAt", pullStartedAt);
+      }
     }
     await setSetting("lastPulledAt", pullStartedAt);
     setStatus(t("sync.done"));
