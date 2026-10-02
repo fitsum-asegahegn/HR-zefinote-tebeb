@@ -42,6 +42,9 @@
 -- If you're picking up roles & permissions (pending / scanner / member /
 -- admin), run ONLY supabase-permissions-migration.sql from this folder.
 --
+-- If you're picking up the Permissions (ፈቃድ) feature, run ONLY
+-- supabase-excuses-migration.sql from this folder.
+--
 -- If you're picking up synced deletes (soft-delete tombstones), run
 -- ONLY this migration (the last block of this file, "Synced deletes"):
 --   alter table members add column if not exists deleted_at timestamptz;
@@ -338,3 +341,37 @@ create trigger trg_members_guard_deleted before insert or update on members
 drop trigger if exists trg_families_guard_deleted on families;
 create trigger trg_families_guard_deleted before insert or update on families
   for each row execute procedure guard_deleted_at();
+
+-- ---------------------------------------------------------------------
+-- Permissions / excused absences (ፈቃድ). Needs the roles migration first
+-- (uses app_role()). Only members and admins can see or change these.
+-- Removing a permission is a soft-delete (deleted_at) so other devices can
+-- pull the removal, same pattern as members/families.
+create table if not exists excuses (
+  id uuid primary key,
+  member_id uuid not null references members(id) on delete cascade,
+  start_date date not null,
+  end_date date not null,
+  reason text,
+  program_keys jsonb default '[]'::jsonb, -- empty = all programs
+  created_by_name text,
+  deleted_at timestamptz,
+  updated_at timestamptz default now(),
+  check (end_date >= start_date)
+);
+
+drop trigger if exists trg_excuses_updated on excuses;
+create trigger trg_excuses_updated before update on excuses
+  for each row execute procedure set_updated_at();
+
+alter table excuses enable row level security;
+
+drop policy if exists "role read excuses" on excuses;
+drop policy if exists "role insert excuses" on excuses;
+drop policy if exists "role update excuses" on excuses;
+create policy "role read excuses" on excuses
+  for select using (app_role() in ('member','admin'));
+create policy "role insert excuses" on excuses
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update excuses" on excuses
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
