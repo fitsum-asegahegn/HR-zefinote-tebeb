@@ -263,6 +263,19 @@ function mapRemoteToExcuse(r) {
   };
 }
 
+function mapPunishmentToRemote(x) {
+  return {
+    id: x.id, member_id: x.memberId, start_date: x.startDate, end_date: x.endDate,
+    reason: x.reason || null, created_by_name: x.createdBy || null,
+  };
+}
+function mapRemoteToPunishment(r) {
+  return {
+    id: r.id, memberId: r.member_id, startDate: r.start_date, endDate: r.end_date,
+    reason: r.reason || "", createdBy: r.created_by_name || "", synced: true,
+  };
+}
+
 async function syncNow() {
   const statusEl = el("syncStatus");
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
@@ -314,6 +327,13 @@ async function syncNow() {
       if (pendingExcuses.length) {
         const { error } = await sbClient.from("excuses").upsert(pendingExcuses.map(mapExcuseToRemote));
         if (!error) for (const x of pendingExcuses) { x.synced = true; await put("excuses", x); }
+      }
+      // push punishments
+      const punishments = await getAll("punishments");
+      const pendingPunish = punishments.filter((x) => !x.synced);
+      if (pendingPunish.length) {
+        const { error } = await sbClient.from("punishments").upsert(pendingPunish.map(mapPunishmentToRemote));
+        if (!error) for (const x of pendingPunish) { x.synced = true; await put("punishments", x); }
       }
     }
     // push attendance (all roles)
@@ -395,6 +415,18 @@ async function syncNow() {
           await put("excuses", existing ? { ...existing, ...mapped } : mapped);
         }
         await setSetting("lastPulledExcusesAt", pullStartedAt);
+      }
+
+      const sincePu = settings.lastPulledPunishmentsAt || "1970-01-01T00:00:00Z";
+      const { data: remotePunish } = await sbClient.from("punishments").select("*").gt("updated_at", sincePu);
+      if (remotePunish) {
+        for (const rp of remotePunish) {
+          if (rp.deleted_at) { await del("punishments", rp.id); continue; }
+          const existing = await get("punishments", rp.id);
+          const mapped = mapRemoteToPunishment(rp);
+          await put("punishments", existing ? { ...existing, ...mapped } : mapped);
+        }
+        await setSetting("lastPulledPunishmentsAt", pullStartedAt);
       }
     }
     await setSetting("lastPulledAt", pullStartedAt);
