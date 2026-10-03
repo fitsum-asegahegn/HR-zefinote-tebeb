@@ -662,6 +662,25 @@ async function loadActivePunishedIds() {
   return ids;
 }
 
+// ---------- Confession father (የንስሐ አባት) grouping ----------
+// The field is free text, so group on a normalized key (trimmed, single
+// spaces, case-insensitive) — "Aba Gebre" and " aba  gebre " are one father.
+// Members with no confession father recorded go in the "__none__" bucket.
+function normFatherName(s) { return String(s || "").trim().replace(/\s+/g, " "); }
+function confessionFatherKey(s) { const n = normFatherName(s); return n ? n.toLowerCase() : "__none__"; }
+// -> [{ key, name, members }] alphabetical, with the "none recorded" bucket last
+function groupByConfessionFather(members) {
+  const map = new Map();
+  members.forEach((m) => {
+    const key = confessionFatherKey(m.confessionFather);
+    if (!map.has(key)) map.set(key, { key, name: key === "__none__" ? null : normFatherName(m.confessionFather), members: [] });
+    map.get(key).members.push(m);
+  });
+  const groups = [...map.values()].filter((g) => g.key !== "__none__").sort((a, b) => a.name.localeCompare(b.name));
+  if (map.has("__none__")) groups.push(map.get("__none__"));
+  return groups;
+}
+
 // ---------- Dashboard analytics ----------
 async function computeConsecutiveAbsences() {
   const members = (await getAll("members")).filter((m) => m.active !== false);
@@ -1815,6 +1834,7 @@ async function handleQrHit(qrId) {
 async function renderMembers() {
   const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
   const selected = new Set();
+  const confessionFatherGroups = groupByConfessionFather(members);
 
   el("view").innerHTML = `
     <div class="toolbar">
@@ -1833,6 +1853,12 @@ async function renderMembers() {
       <option value="">${t("members.allGrades")}</option>
       ${Array.from({ length: 12 }, (_, i) => i + 1).map((g) => `<option value="${g}">${t("members.gradeShort", { n: g })}</option>`).join("")}
     </select>
+    <div class="toolbar" style="margin-bottom:0;">
+      <select id="confessionFatherFilter" class="text-input">
+        <option value="">${getLang() === "am" ? "ሁሉም የንስሐ አባቶች" : "All confession fathers"}</option>
+        ${confessionFatherGroups.map((g) => `<option value="${escapeHtml(g.key)}">${escapeHtml(g.name || (getLang() === "am" ? "(አልተመዘገበም)" : "(none recorded)"))} (${g.members.length})</option>`).join("")}
+      </select>
+    </div>
     <input id="areaCodeFilter" type="number" class="text-input" placeholder="${getLang() === "am" ? "የቦታ ኮድ (ለምሳሌ 400)" : "Area code (e.g. 400)"}">
     <p class="muted" id="areaCodeCount" style="display:none;margin-top:-6px;"></p>
     <div id="memberList" class="list"></div>
@@ -1885,7 +1911,8 @@ async function renderMembers() {
     const g = el("gradeFilter").value;
     const areaBaseRaw = el("areaCodeFilter").value;
     const countEl = el("areaCodeCount");
-    let filtered = members.filter((m) => m.fullName.toLowerCase().includes(q) && (g === "" || String(m.grade) === g));
+    const cf = el("confessionFatherFilter").value;
+    let filtered = members.filter((m) => m.fullName.toLowerCase().includes(q) && (g === "" || String(m.grade) === g) && (cf === "" || confessionFatherKey(m.confessionFather) === cf));
     if (areaBaseRaw !== "") {
       const base = Number(areaBaseRaw);
       const upper = base + 99;
@@ -1906,6 +1933,7 @@ async function renderMembers() {
   draw(members);
   el("memberSearch").oninput = applyFilters;
   el("gradeFilter").onchange = applyFilters;
+  el("confessionFatherFilter").onchange = applyFilters;
   el("areaCodeFilter").oninput = applyFilters;
 
   el("excelInput").onchange = async (e) => {
@@ -2860,6 +2888,7 @@ async function renderGroups() {
   if (view === "excuses") return renderExcuses();
   if (view === "punishments") return renderPunishments();
   if (view === "advice") return renderAdvice();
+  if (view === "confessionFathers") return renderGroupsConfessionFathers();
   return renderGroupsMenu();
 }
 
@@ -2867,6 +2896,7 @@ function renderGroupsMenu() {
   const lang = getLang();
   const cards = [
     { view: "departments", icon: "🏢", label: lang === "am" ? "ክፍላት" : "Departments" },
+    { view: "confessionFathers", icon: "✝️", label: lang === "am" ? "የንስሐ አባት" : "Confession Fathers" },
     { view: "families", icon: "👪", label: lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure" },
     { view: "serviceAttendance", icon: "📋", label: lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance" },
     { view: "lostMembers", icon: "🔍", label: lang === "am" ? "የጠፉ አባላት" : "Lost Members" },
@@ -2986,6 +3016,48 @@ async function renderGroupsDepartments() {
       }).join("")}
     </div>
   `;
+}
+
+window.toggleCfGroup = (i) => {
+  const box = el("cfGroup_" + i);
+  if (box) box.style.display = box.style.display === "none" ? "block" : "none";
+};
+
+// Same idea as the Departments screen: one expandable row per confession
+// father with their members underneath, plus a dropdown to filter down to
+// a single father (whose group then opens automatically).
+async function renderGroupsConfessionFathers() {
+  const lang = getLang();
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const groups = groupByConfessionFather(members);
+  const filter = window._cfFilter || "";
+  const shown = filter ? groups.filter((g) => g.key === filter) : groups;
+  const label = (g) => g.name || (lang === "am" ? "(የንስሐ አባት አልተመዘገበም)" : "(no confession father recorded)");
+
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
+    <h3 class="section-title">${lang === "am" ? "በንስሐ አባት" : "By Confession Father"}</h3>
+    <select id="cfFilter" class="text-input">
+      <option value="">${lang === "am" ? "ሁሉም የንስሐ አባቶች" : "All confession fathers"} (${groups.length})</option>
+      ${groups.map((g) => `<option value="${escapeHtml(g.key)}" ${g.key === filter ? "selected" : ""}>${escapeHtml(label(g))} (${g.members.length})</option>`).join("")}
+    </select>
+    <div class="list">
+      ${shown.length ? shown.map((g, i) => `
+        <div class="list-row" style="flex-direction:column;align-items:stretch;">
+          <div class="list-row" style="padding:0;cursor:pointer;" onclick="toggleCfGroup(${i})">
+            <div style="flex:1;">
+              <b>${escapeHtml(label(g))}</b><br>
+              <span class="muted">${g.members.length} ${lang === "am" ? "አባላት" : "members"}</span>
+            </div>
+          </div>
+          <div id="cfGroup_${i}" class="list" style="display:${filter ? "block" : "none"};margin-top:8px;">
+            ${g.members.map((m) => `
+              <div class="list-row"><div>${escapeHtml(m.fullName)}${m.phone ? ` <span class="muted">· ${escapeHtml(m.phone)}</span>` : ""}</div></div>`).join("")}
+          </div>
+        </div>`).join("") : `<p class="muted">${lang === "am" ? "ምንም አባል የለም" : "No members"}</p>`}
+    </div>
+  `;
+  el("cfFilter").onchange = (e) => { window._cfFilter = e.target.value; renderGroupsConfessionFathers(); };
 }
 
 async function renderGroupsFamilies() {
