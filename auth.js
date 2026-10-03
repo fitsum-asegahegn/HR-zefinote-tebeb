@@ -276,6 +276,19 @@ function mapRemoteToPunishment(r) {
   };
 }
 
+function mapAdviceToRemote(x) {
+  return {
+    id: x.id, member_id: x.memberId, advised_on: x.date,
+    fault: x.fault || null, advice: x.advice || null, advised_by: x.advisedBy || null,
+  };
+}
+function mapRemoteToAdvice(r) {
+  return {
+    id: r.id, memberId: r.member_id, date: r.advised_on,
+    fault: r.fault || "", advice: r.advice || "", advisedBy: r.advised_by || "", synced: true,
+  };
+}
+
 async function syncNow() {
   const statusEl = el("syncStatus");
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
@@ -334,6 +347,13 @@ async function syncNow() {
       if (pendingPunish.length) {
         const { error } = await sbClient.from("punishments").upsert(pendingPunish.map(mapPunishmentToRemote));
         if (!error) for (const x of pendingPunish) { x.synced = true; await put("punishments", x); }
+      }
+      // push advice records
+      const adviceAll = await getAll("advice");
+      const pendingAdvice = adviceAll.filter((x) => !x.synced);
+      if (pendingAdvice.length) {
+        const { error } = await sbClient.from("advice").upsert(pendingAdvice.map(mapAdviceToRemote));
+        if (!error) for (const x of pendingAdvice) { x.synced = true; await put("advice", x); }
       }
     }
     // push attendance (all roles)
@@ -427,6 +447,18 @@ async function syncNow() {
           await put("punishments", existing ? { ...existing, ...mapped } : mapped);
         }
         await setSetting("lastPulledPunishmentsAt", pullStartedAt);
+      }
+
+      const sinceAd = settings.lastPulledAdviceAt || "1970-01-01T00:00:00Z";
+      const { data: remoteAdvice } = await sbClient.from("advice").select("*").gt("updated_at", sinceAd);
+      if (remoteAdvice) {
+        for (const ra of remoteAdvice) {
+          if (ra.deleted_at) { await del("advice", ra.id); continue; }
+          const existing = await get("advice", ra.id);
+          const mapped = mapRemoteToAdvice(ra);
+          await put("advice", existing ? { ...existing, ...mapped } : mapped);
+        }
+        await setSetting("lastPulledAdviceAt", pullStartedAt);
       }
     }
     await setSetting("lastPulledAt", pullStartedAt);
