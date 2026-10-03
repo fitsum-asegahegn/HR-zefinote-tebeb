@@ -42,6 +42,12 @@
 -- If you're picking up roles & permissions (pending / scanner / member /
 -- admin), run ONLY supabase-permissions-migration.sql from this folder.
 --
+-- If you're picking up the Advice (ምክር) feature, run ONLY
+-- supabase-advice-migration.sql from this folder.
+--
+-- If you're picking up the Punishments (ቅጣት) feature, run ONLY
+-- supabase-punishments-migration.sql from this folder.
+--
 -- If you're picking up the Permissions (ፈቃድ) feature, run ONLY
 -- supabase-excuses-migration.sql from this folder.
 --
@@ -374,4 +380,70 @@ create policy "role read excuses" on excuses
 create policy "role insert excuses" on excuses
   for insert with check (app_role() in ('member','admin'));
 create policy "role update excuses" on excuses
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
+
+-- ---------------------------------------------------------------------
+-- Punishments (ቅጣት). Needs the roles migration first (uses app_role()).
+-- A member on punishment can still attend and be scanned, but is left out of
+-- the Service Attendance report until end_date has passed. Only members and
+-- admins can see or change these. Removing one is a soft-delete (deleted_at)
+-- so other devices can pull the removal.
+create table if not exists punishments (
+  id uuid primary key,
+  member_id uuid not null references members(id) on delete cascade,
+  start_date date not null,
+  end_date date not null,
+  reason text,
+  created_by_name text,
+  deleted_at timestamptz,
+  updated_at timestamptz default now(),
+  check (end_date >= start_date)
+);
+
+drop trigger if exists trg_punishments_updated on punishments;
+create trigger trg_punishments_updated before update on punishments
+  for each row execute procedure set_updated_at();
+
+alter table punishments enable row level security;
+
+drop policy if exists "role read punishments" on punishments;
+drop policy if exists "role insert punishments" on punishments;
+drop policy if exists "role update punishments" on punishments;
+create policy "role read punishments" on punishments
+  for select using (app_role() in ('member','admin'));
+create policy "role insert punishments" on punishments
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update punishments" on punishments
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
+
+-- ---------------------------------------------------------------------
+-- Advice / counseling log (ምክር). Needs the roles migration first (uses
+-- app_role()). Members who made a fault and were advised to correct it
+-- before any punishment. Only members and admins can see or change these.
+-- Removing a record is a soft-delete (deleted_at) so other devices can pull it.
+create table if not exists advice (
+  id uuid primary key,
+  member_id uuid not null references members(id) on delete cascade,
+  advised_on date not null,
+  fault text,
+  advice text,
+  advised_by text,
+  deleted_at timestamptz,
+  updated_at timestamptz default now()
+);
+
+drop trigger if exists trg_advice_updated on advice;
+create trigger trg_advice_updated before update on advice
+  for each row execute procedure set_updated_at();
+
+alter table advice enable row level security;
+
+drop policy if exists "role read advice" on advice;
+drop policy if exists "role insert advice" on advice;
+drop policy if exists "role update advice" on advice;
+create policy "role read advice" on advice
+  for select using (app_role() in ('member','admin'));
+create policy "role insert advice" on advice
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update advice" on advice
   for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
