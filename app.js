@@ -2892,8 +2892,33 @@ async function renderGroups() {
   return renderGroupsMenu();
 }
 
-function renderGroupsMenu() {
+async function renderGroupsMenu() {
   const lang = getLang();
+  const today = todayISO();
+  const [members, excuses, punishments, advice, families] = await Promise.all([
+    getAll("members"), getAll("excuses"), getAll("punishments"), getAll("advice"), getAll("families"),
+  ]);
+  const ids = new Set(members.map((m) => m.id));
+  const distinct = (rows) => new Set(rows.filter((r) => ids.has(r.memberId)).map((r) => r.memberId)).size;
+  const activeNow = (r) => r.startDate <= today && today <= r.endDate;
+  const n = {
+    dept: members.filter((m) => m.category).length,
+    father: members.filter((m) => normFatherName(m.confessionFather)).length,
+    families: families.length,
+    lost: members.filter((m) => m.active === false).length,
+    perm: distinct(excuses.filter(activeNow)),
+    punish: distinct(punishments.filter(activeNow)),
+    advised: distinct(advice),
+  };
+  const subs = {
+    departments: lang === "am" ? `${n.dept} አባላት ተመድበዋል` : `${n.dept} members assigned`,
+    confessionFathers: lang === "am" ? `${n.father} አባላት ተመዝግበዋል` : `${n.father} members recorded`,
+    families: lang === "am" ? `${n.families} ቤተሰቦች` : `${n.families} families`,
+    lostMembers: lang === "am" ? `${n.lost} የጠፉ` : `${n.lost} lost`,
+    excuses: lang === "am" ? `${n.perm} በፈቃድ ላይ` : `${n.perm} on permission now`,
+    punishments: lang === "am" ? `${n.punish} በቅጣት ላይ` : `${n.punish} on punishment now`,
+    advice: lang === "am" ? `${n.advised} አባላት ተመክረዋል` : `${n.advised} members advised`,
+  };
   const cards = [
     { view: "departments", icon: "🏢", label: lang === "am" ? "ክፍላት" : "Departments" },
     { view: "confessionFathers", icon: "✝️", label: lang === "am" ? "የንስሐ አባት" : "Confession Fathers" },
@@ -2912,6 +2937,7 @@ function renderGroupsMenu() {
         <div class="list-row" style="flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:26px 10px;cursor:pointer;min-height:110px;" onclick="window._groupsView='${c.view}';renderGroups();">
           <div style="font-size:2rem;">${c.icon}</div>
           <b style="margin-top:8px;">${c.label}</b>
+          ${subs[c.view] ? `<span class="muted" style="margin-top:4px;">${subs[c.view]}</span>` : ""}
         </div>`).join("")}
     </div>
   `;
@@ -2934,6 +2960,7 @@ async function renderLostMembers() {
     <p class="muted">${lang === "am"
       ? "የተመረጡ አባላት አሁን ሰንበት ትምህርት ቤት ስለማይማሩ/ስለማይመጡ ከጥሪ ዝርዝር (ተከታታይ ቀሪ ማሳሰቢያ) ውጪ ይሆናሉ።"
       : "Checked members no longer attend, so they'll be excluded from the absentee call list and related reminders."}</p>
+    <p class="muted" id="lostSummary"></p>
     <input id="lostSearch" class="text-input" placeholder="${lang === "am" ? "በስም ፈልግ" : "Search by name"}">
     <div class="list" id="lostList"></div>
     <div class="toolbar" style="margin-top:12px;">
@@ -2942,6 +2969,10 @@ async function renderLostMembers() {
   `;
 
   function draw(list) {
+    const lostNow = [...pending.values()].filter(Boolean).length;
+    el("lostSummary").textContent = lang === "am"
+      ? `የጠፉ: ${lostNow} ከ ${members.length} አባላት`
+      : `Lost: ${lostNow} of ${members.length} members`;
     el("lostList").innerHTML = list.map((m) => `
       <div class="list-row">
         <label class="sel-check">
@@ -2994,6 +3025,9 @@ async function renderGroupsDepartments() {
   el("view").innerHTML = `
     ${groupsBackBtn()}
     <h3 class="section-title">${lang === "am" ? "በክፍል" : "By Department"}</h3>
+    <p class="muted">${lang === "am"
+      ? `${members.filter((m) => m.category).length} ከ ${members.length} አባላት ክፍል ተመድቦላቸዋል`
+      : `${members.filter((m) => m.category).length} of ${members.length} members assigned to a department`}</p>
     <div class="list">
       ${DEPT_OPTIONS.map((dept, i) => {
         const deptMembers = members.filter((m) => m.category === dept);
@@ -3037,6 +3071,9 @@ async function renderGroupsConfessionFathers() {
   el("view").innerHTML = `
     ${groupsBackBtn()}
     <h3 class="section-title">${lang === "am" ? "በንስሐ አባት" : "By Confession Father"}</h3>
+    <p class="muted">${lang === "am"
+      ? `${groups.filter((g) => g.key !== "__none__").length} የንስሐ አባቶች · ${members.filter((m) => normFatherName(m.confessionFather)).length} ከ ${members.length} አባላት ተመዝግበዋል`
+      : `${groups.filter((g) => g.key !== "__none__").length} confession fathers · ${members.filter((m) => normFatherName(m.confessionFather)).length} of ${members.length} members recorded`}</p>
     <select id="cfFilter" class="text-input">
       <option value="">${lang === "am" ? "ሁሉም የንስሐ አባቶች" : "All confession fathers"} (${groups.length})</option>
       ${groups.map((g) => `<option value="${escapeHtml(g.key)}" ${g.key === filter ? "selected" : ""}>${escapeHtml(label(g))} (${g.members.length})</option>`).join("")}
@@ -3482,6 +3519,7 @@ async function renderExcuses() {
     <p class="muted">${lang === "am"
       ? "ከፕሮግራም በፊት ፈቃድ የጠየቁ ወይም ለረጅም ጊዜ (ለምሳሌ ለአንድ ዓመት) የተፈቀደላቸው አባላት። በፈቃዱ ጊዜ ውስጥ ያሉ ክፍለ ጊዜዎች በአገልግሎት አቴንዳንስ ሪፖርት እንደተገኙ ይቆጠራሉ፣ ለጥሪ ዝርዝርም አይወጡም።"
       : "Members who asked permission before a program, or were granted a long leave (e.g. a year). Sessions inside the permission window count as attended in the Service Attendance report, and these members won't show on the absentee call list."}</p>
+    <p class="muted" id="excuseSummary"></p>
     <div class="toolbar">
       <button id="addExcuseBtn" class="btn-primary">${lang === "am" ? "+ ፈቃድ ጨምር" : "+ Add Permission"}</button>
     </div>
@@ -3530,6 +3568,10 @@ async function renderExcuses() {
     }).join("") : `<p class="muted">${lang === "am" ? "ምንም ፈቃድ የለም" : "No permissions to show"}</p>`;
   }
 
+  const exCount = (st) => new Set(excuses.filter((x) => memberMap.has(x.memberId) && statusOf(x) === st).map((x) => x.memberId)).size;
+  el("excuseSummary").textContent = lang === "am"
+    ? `በሥራ ላይ: ${exCount("active")} · የሚመጡ: ${exCount("upcoming")} · ያለቁ: ${exCount("expired")} (አባላት)`
+    : `Active: ${exCount("active")} · Upcoming: ${exCount("upcoming")} · Finished: ${exCount("expired")} (members)`;
   el("addExcuseBtn").onclick = () => openExcuseModal();
   el("excuseSearch").oninput = draw;
   el("excuseFilter").onchange = (e) => { window._excuseFilter = e.target.value; draw(); };
@@ -3699,6 +3741,7 @@ async function renderPunishments() {
     <p class="muted">${lang === "am"
       ? "በቅጣት ላይ ያሉ አባላት መምጣትና መመዝገብ ይችላሉ፣ ነገር ግን ቅጣታቸው እስኪያልቅ ድረስ በአገልግሎት አቴንዳንስ ሪፖርት ውስጥ አይካተቱም።"
       : "Members on punishment can still come and be scanned, but they're left out of the Service Attendance report until their punishment period ends."}</p>
+    <p class="muted" id="punishSummary"></p>
     <div class="toolbar">
       <button id="addPunishBtn" class="btn-primary">${lang === "am" ? "+ ቅጣት ጨምር" : "+ Add Punishment"}</button>
     </div>
@@ -3744,6 +3787,10 @@ async function renderPunishments() {
     }).join("") : `<p class="muted">${lang === "am" ? "ምንም ቅጣት የለም" : "No punishments to show"}</p>`;
   }
 
+  const puCount = (st) => new Set(punishments.filter((x) => memberMap.has(x.memberId) && statusOf(x) === st).map((x) => x.memberId)).size;
+  el("punishSummary").textContent = lang === "am"
+    ? `በቅጣት ላይ: ${puCount("active")} · የሚመጡ: ${puCount("upcoming")} · ያለቁ: ${puCount("expired")} (አባላት)`
+    : `Active: ${puCount("active")} · Upcoming: ${puCount("upcoming")} · Finished: ${puCount("expired")} (members)`;
   el("addPunishBtn").onclick = () => openPunishModal();
   el("punishSearch").oninput = draw;
   el("punishFilter").onchange = (e) => { window._punishFilter = e.target.value; draw(); };
@@ -3902,6 +3949,7 @@ async function renderAdvice() {
     <p class="muted">${lang === "am"
       ? "ከቅጣት በፊት ስህተት የሰሩ አባላትን የመከርንበት መዝገብ። የተፈጠረውን ጥፋትና የተሰጠውን ምክር እዚህ ይመዝግቡ።"
       : "A log of members who made a fault and were advised to correct it before any punishment. Record what happened and the advice given."}</p>
+    <p class="muted" id="adviceSummary"></p>
     <div class="toolbar">
       <button id="addAdviceBtn" class="btn-primary">${lang === "am" ? "+ ምክር ጨምር" : "+ Add Advice"}</button>
     </div>
@@ -3942,6 +3990,11 @@ async function renderAdvice() {
     }).join("") : `<p class="muted">${lang === "am" ? "ምንም ምክር አልተመዘገበም" : "No advice recorded"}</p>`;
   }
 
+  const adviceRecords = entries.filter((en) => memberMap.has(en.memberId)).length;
+  const repeatCount = [...counts.values()].filter((c) => c >= 2).length;
+  el("adviceSummary").textContent = lang === "am"
+    ? `${counts.size} አባላት ተመክረዋል · ${adviceRecords} መዝገቦች · ${repeatCount} ከ2 ጊዜ በላይ`
+    : `${counts.size} members advised · ${adviceRecords} records · ${repeatCount} advised 2+ times`;
   el("addAdviceBtn").onclick = () => openAdviceModal();
   el("adviceSearch").oninput = draw;
   el("adviceFilter").onchange = (e) => { window._adviceFilter = e.target.value; draw(); };
