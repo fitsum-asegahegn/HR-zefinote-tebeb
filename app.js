@@ -444,6 +444,8 @@ async function importMembersFromWorkbook(file) {
     const dept1 = pick(row, ["ምርጫ 1", "Preference 1", "dept1"]);
     const dept2 = pick(row, ["ምርጫ 2", "Preference 2", "dept2"]);
     const dept3 = pick(row, ["ምርጫ 3", "Preference 3", "dept3"]);
+    const jobTitleVal = normText(pick(row, ["ሙያ / ሥራ", "ሙያ", "Job", "Job Title", "jobTitle"]));
+    const occStatus = normalizeOccupationStatus(pick(row, ["የሥራ ሁኔታ", "Occupation Status", "occupationStatus"])) || (jobTitleVal ? "employed" : "");
 
     if (!member) {
       member = {
@@ -464,6 +466,8 @@ async function importMembersFromWorkbook(file) {
         dept1: dept1 ? String(dept1).trim() : "",
         dept2: dept2 ? String(dept2).trim() : "",
         dept3: dept3 ? String(dept3).trim() : "",
+        occupationStatus: occStatus,
+        jobTitle: occStatus === "employed" ? jobTitleVal : "",
       };
       existingList.push(member);
     } else {
@@ -486,6 +490,10 @@ async function importMembersFromWorkbook(file) {
       if (dept1) member.dept1 = String(dept1).trim();
       if (dept2) member.dept2 = String(dept2).trim();
       if (dept3) member.dept3 = String(dept3).trim();
+      if (occStatus) {
+        member.occupationStatus = occStatus;
+        member.jobTitle = occStatus === "employed" ? (jobTitleVal || member.jobTitle || "") : "";
+      }
       member.synced = false;
     }
     await put("members", member);
@@ -567,6 +575,8 @@ async function addMemberManual(fullName, phone, category, grade, extras = {}) {
     dept2: extras.dept2 || "",
     dept3: extras.dept3 || "",
     photo: extras.photo || null,
+    occupationStatus: extras.occupationStatus || "",
+    jobTitle: extras.jobTitle || "",
   };
   await put("members", member);
   return member;
@@ -678,6 +688,54 @@ function groupByConfessionFather(members) {
   });
   const groups = [...map.values()].filter((g) => g.key !== "__none__").sort((a, b) => a.name.localeCompare(b.name));
   if (map.has("__none__")) groups.push(map.get("__none__"));
+  return groups;
+}
+
+// ---------- Occupation (ሥራ): employed / student / unemployed ----------
+// Employed members also have a free-text job title. Groups are built from
+// whatever titles exist, so if there are doctors there is a "Doctor" group,
+// and a new title creates its own group automatically (spelling/case
+// variants of the same title merge).
+function normText(s) { return String(s || "").trim().replace(/\s+/g, " "); }
+function normalizeOccupationStatus(v) {
+  const s = normText(v).toLowerCase();
+  if (!s) return "";
+  if (["employed", "employee", "worker", "working", "ሠራተኛ", "ሰራተኛ", "ተቀጣሪ"].includes(s)) return "employed";
+  if (["student", "ተማሪ"].includes(s)) return "student";
+  if (["unemployed", "jobless", "ሥራ የሌለው", "ስራ የሌለው", "ሥራ አጥ", "ስራ አጥ"].includes(s)) return "unemployed";
+  return "";
+}
+function occupationLabel(status, lang) {
+  const labels = {
+    employed: lang === "am" ? "ሠራተኛ" : "Employed",
+    student: lang === "am" ? "ተማሪ" : "Student",
+    unemployed: lang === "am" ? "ሥራ የሌለው" : "Unemployed",
+  };
+  return labels[status] || "";
+}
+// -> [{ key, kind: "job"|"student"|"unemployed"|"none", name, members }]
+//    jobs alphabetical (employed with no title last of the jobs), then students,
+//    unemployed, and members with no occupation recorded.
+function groupByOccupation(members) {
+  const jobs = new Map();
+  const noTitle = [], students = [], unemployed = [], none = [];
+  members.forEach((m) => {
+    const st = m.occupationStatus || "";
+    if (st === "employed") {
+      const name = normText(m.jobTitle);
+      if (!name) { noTitle.push(m); return; }
+      const key = "job:" + name.toLowerCase();
+      if (!jobs.has(key)) jobs.set(key, { key, kind: "job", name, members: [] });
+      jobs.get(key).members.push(m);
+    } else if (st === "student") students.push(m);
+    else if (st === "unemployed") unemployed.push(m);
+    else none.push(m);
+  });
+  const groups = [...jobs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  if (noTitle.length) groups.push({ key: "job:__notitle__", kind: "job", name: null, members: noTitle });
+  if (students.length) groups.push({ key: "status:student", kind: "student", name: null, members: students });
+  if (unemployed.length) groups.push({ key: "status:unemployed", kind: "unemployed", name: null, members: unemployed });
+  if (none.length) groups.push({ key: "status:none", kind: "none", name: null, members: none });
   return groups;
 }
 
@@ -2141,6 +2199,8 @@ async function exportMembersExcel(members) {
     "ምርጫ 1": m.dept1 || "",
     "ምርጫ 2": m.dept2 || "",
     "ምርጫ 3": m.dept3 || "",
+    "የሥራ ሁኔታ": occupationLabel(m.occupationStatus, "am"),
+    "ሙያ / ሥራ": m.jobTitle || "",
     "የመጨረሻ ንስሃ ቀን": m.lastConfessionDate || "",
     "የተቀላቀሉበት ቀን": m.joinDate || "",
     "QR ID": m.qrId,
@@ -2187,6 +2247,8 @@ window.openRegistrationModal = async function(editId) {
   const member = editId ? await get("members", editId) : null;
   const isEdit = !!member;
   const deptOptions = DEPT_OPTIONS;
+  // existing job titles, offered as suggestions so the same job is spelled the same way
+  const existingJobs = [...new Set((await getAll("members")).map((x) => normText(x.jobTitle)).filter(Boolean))].sort();
 
   const deptSelect = (name, selected) => `
     <select id="${name}" class="text-input">
@@ -2251,6 +2313,20 @@ window.openRegistrationModal = async function(editId) {
         <label>${t("members.grade")}</label>
         <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}">
 
+        ${sectionTitle(getLang() === "am" ? "የሥራ ሁኔታ" : "Occupation")}
+        <label>${getLang() === "am" ? "የሥራ ሁኔታ" : "Status"}</label>
+        <select id="f_occStatus" class="text-input">
+          <option value="">---</option>
+          <option value="employed" ${member?.occupationStatus === "employed" ? "selected" : ""}>${occupationLabel("employed", getLang())}</option>
+          <option value="student" ${member?.occupationStatus === "student" ? "selected" : ""}>${occupationLabel("student", getLang())}</option>
+          <option value="unemployed" ${member?.occupationStatus === "unemployed" ? "selected" : ""}>${occupationLabel("unemployed", getLang())}</option>
+        </select>
+        <div id="f_jobWrap" style="display:${member?.occupationStatus === "employed" ? "block" : "none"};">
+          <label>${getLang() === "am" ? "ሙያ / የሥራ ዓይነት (ለምሳሌ ዶክተር)" : "Job / profession (e.g. Doctor)"}</label>
+          <input id="f_jobTitle" class="text-input" list="f_jobList" value="${escapeHtml(member?.jobTitle || "")}">
+          <datalist id="f_jobList">${existingJobs.map((j) => `<option value="${escapeHtml(j)}"></option>`).join("")}</datalist>
+        </div>
+
         ${sectionTitle(getLang() === "am" ? "የክፍል ምደባ" : "Department")}
         <label>${t("members.assignedDept")}</label>
         ${deptSelect('f_assignedDept', member?.category)}
@@ -2270,6 +2346,7 @@ window.openRegistrationModal = async function(editId) {
   document.body.appendChild(box);
 
   let photoDataUrl = member?.photo || null;
+  el("f_occStatus").onchange = () => { el("f_jobWrap").style.display = el("f_occStatus").value === "employed" ? "block" : "none"; };
   el("f_photoInput").onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -2313,6 +2390,8 @@ window.openRegistrationModal = async function(editId) {
       dept2: el("f_dept2").value,
       dept3: el("f_dept3").value,
       photo: photoDataUrl,
+      occupationStatus: el("f_occStatus").value,
+      jobTitle: el("f_occStatus").value === "employed" ? normText(el("f_jobTitle").value) : "",
     };
 
     if (!data.fullName) { await showAlert(t("members.fullNameRequired")); return; }
@@ -2340,6 +2419,8 @@ window.openRegistrationModal = async function(editId) {
       m.dept2 = data.dept2;
       m.dept3 = data.dept3;
       m.photo = data.photo;
+      m.occupationStatus = data.occupationStatus;
+      m.jobTitle = data.jobTitle;
       m.synced = false;
 
       await put("members", m);
@@ -2889,6 +2970,7 @@ async function renderGroups() {
   if (view === "punishments") return renderPunishments();
   if (view === "advice") return renderAdvice();
   if (view === "confessionFathers") return renderGroupsConfessionFathers();
+  if (view === "occupation") return renderGroupsOccupation();
   return renderGroupsMenu();
 }
 
@@ -2909,10 +2991,16 @@ async function renderGroupsMenu() {
     perm: distinct(excuses.filter(activeNow)),
     punish: distinct(punishments.filter(activeNow)),
     advised: distinct(advice),
+    employed: members.filter((m) => m.occupationStatus === "employed").length,
+    students: members.filter((m) => m.occupationStatus === "student").length,
+    unemployed: members.filter((m) => m.occupationStatus === "unemployed").length,
   };
   const subs = {
     departments: lang === "am" ? `${n.dept} አባላት ተመድበዋል` : `${n.dept} members assigned`,
     confessionFathers: lang === "am" ? `${n.father} አባላት ተመዝግበዋል` : `${n.father} members recorded`,
+    occupation: lang === "am"
+      ? `${n.employed} ሠራተኛ · ${n.students} ተማሪ · ${n.unemployed} ሥራ የሌለው`
+      : `${n.employed} employed · ${n.students} students · ${n.unemployed} unemployed`,
     families: lang === "am" ? `${n.families} ቤተሰቦች` : `${n.families} families`,
     lostMembers: lang === "am" ? `${n.lost} የጠፉ` : `${n.lost} lost`,
     excuses: lang === "am" ? `${n.perm} በፈቃድ ላይ` : `${n.perm} on permission now`,
@@ -2922,6 +3010,7 @@ async function renderGroupsMenu() {
   const cards = [
     { view: "departments", icon: "🏢", label: lang === "am" ? "ክፍላት" : "Departments" },
     { view: "confessionFathers", icon: "✝️", label: lang === "am" ? "የንስሐ አባት" : "Confession Fathers" },
+    { view: "occupation", icon: "💼", label: lang === "am" ? "ሥራ" : "Occupation" },
     { view: "families", icon: "👪", label: lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure" },
     { view: "serviceAttendance", icon: "📋", label: lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance" },
     { view: "lostMembers", icon: "🔍", label: lang === "am" ? "የጠፉ አባላት" : "Lost Members" },
@@ -3095,6 +3184,68 @@ async function renderGroupsConfessionFathers() {
     </div>
   `;
   el("cfFilter").onchange = (e) => { window._cfFilter = e.target.value; renderGroupsConfessionFathers(); };
+}
+
+window.toggleOccGroup = (i) => {
+  const box = el("occGroup_" + i);
+  if (box) box.style.display = box.style.display === "none" ? "block" : "none";
+};
+
+// One expandable row per job title (employed), plus Students, Unemployed and
+// "not recorded" — same layout as the Departments / Confession Fathers
+// screens, with a dropdown to filter down to one group.
+async function renderGroupsOccupation() {
+  const lang = getLang();
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const groups = groupByOccupation(members);
+  const filter = window._occFilter || "";
+  const jobGroups = groups.filter((g) => g.kind === "job");
+  const sizeOf = (kind) => (groups.find((g) => g.kind === kind) || { members: [] }).members.length;
+  const employedTotal = jobGroups.reduce((sum, g) => sum + g.members.length, 0);
+  const label = (g) => {
+    if (g.kind === "job") return g.name || (lang === "am" ? "ሠራተኛ (ሙያ ያልተመዘገበ)" : "Employed (no job title)");
+    if (g.kind === "none") return lang === "am" ? "(አልተመዘገበም)" : "(not recorded)";
+    return occupationLabel(g.kind, lang);
+  };
+  const kindText = (g) => (g.kind === "job" ? occupationLabel("employed", lang) : "");
+
+  let shown = groups;
+  if (filter === "status:employed") shown = jobGroups;
+  else if (filter) shown = groups.filter((g) => g.key === filter);
+
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
+    <h3 class="section-title">${lang === "am" ? "በሥራ" : "By Occupation"}</h3>
+    <p class="muted">${lang === "am"
+      ? `ሠራተኛ: ${employedTotal} (${jobGroups.filter((g) => g.name).length} የሥራ ዓይነቶች) · ተማሪ: ${sizeOf("student")} · ሥራ የሌለው: ${sizeOf("unemployed")} · ያልተመዘገበ: ${sizeOf("none")}`
+      : `Employed: ${employedTotal} (${jobGroups.filter((g) => g.name).length} job types) · Students: ${sizeOf("student")} · Unemployed: ${sizeOf("unemployed")} · Not recorded: ${sizeOf("none")}`}</p>
+    <select id="occFilter" class="text-input">
+      <option value="">${lang === "am" ? "ሁሉም" : "Everyone"}</option>
+      <option value="status:employed" ${filter === "status:employed" ? "selected" : ""}>${lang === "am" ? "ሠራተኛ — ሁሉም ሥራዎች" : "Employed — all jobs"} (${employedTotal})</option>
+      <option value="status:student" ${filter === "status:student" ? "selected" : ""}>${occupationLabel("student", lang)} (${sizeOf("student")})</option>
+      <option value="status:unemployed" ${filter === "status:unemployed" ? "selected" : ""}>${occupationLabel("unemployed", lang)} (${sizeOf("unemployed")})</option>
+      <option value="status:none" ${filter === "status:none" ? "selected" : ""}>${lang === "am" ? "ያልተመዘገበ" : "Not recorded"} (${sizeOf("none")})</option>
+      ${jobGroups.length ? `<optgroup label="${lang === "am" ? "የሥራ ዓይነቶች" : "Jobs"}">
+        ${jobGroups.map((g) => `<option value="${escapeHtml(g.key)}" ${g.key === filter ? "selected" : ""}>${escapeHtml(label(g))} (${g.members.length})</option>`).join("")}
+      </optgroup>` : ""}
+    </select>
+    <div class="list">
+      ${shown.length ? shown.map((g, i) => `
+        <div class="list-row" style="flex-direction:column;align-items:stretch;">
+          <div class="list-row" style="padding:0;cursor:pointer;" onclick="toggleOccGroup(${i})">
+            <div style="flex:1;">
+              <b>${escapeHtml(label(g))}</b><br>
+              <span class="muted">${g.members.length} ${lang === "am" ? "አባላት" : "members"}${kindText(g) ? " · " + kindText(g) : ""}</span>
+            </div>
+          </div>
+          <div id="occGroup_${i}" class="list" style="display:${filter ? "block" : "none"};margin-top:8px;">
+            ${g.members.map((m) => `
+              <div class="list-row"><div>${escapeHtml(m.fullName)}${m.phone ? ` <span class="muted">· ${escapeHtml(m.phone)}</span>` : ""}</div></div>`).join("")}
+          </div>
+        </div>`).join("") : `<p class="muted">${lang === "am" ? "ምንም አባል የለም" : "No members"}</p>`}
+    </div>
+  `;
+  el("occFilter").onchange = (e) => { window._occFilter = e.target.value; renderGroupsOccupation(); };
 }
 
 async function renderGroupsFamilies() {

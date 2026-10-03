@@ -208,6 +208,7 @@ function mapMemberToRemote(m) {
     education_level: m.educationLevel || null, spiritual_education: m.spiritualEducation || null,
     dept1: m.dept1 || null, dept2: m.dept2 || null, dept3: m.dept3 || null,
     photo: m.photo || null,
+    occupation_status: m.occupationStatus || null, job_title: m.jobTitle || null,
   };
 }
 function mapRemoteToMember(r) {
@@ -221,6 +222,7 @@ function mapRemoteToMember(r) {
     educationLevel: r.education_level || "", spiritualEducation: r.spiritual_education || "",
     dept1: r.dept1 || "", dept2: r.dept2 || "", dept3: r.dept3 || "",
     photo: r.photo || null,
+    occupationStatus: r.occupation_status || "", jobTitle: r.job_title || "",
   };
 }
 function mapAttendanceToRemote(a, userId) {
