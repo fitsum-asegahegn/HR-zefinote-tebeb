@@ -209,6 +209,7 @@ function mapMemberToRemote(m) {
     dept1: m.dept1 || null, dept2: m.dept2 || null, dept3: m.dept3 || null,
     photo: m.photo || null,
     occupation_status: m.occupationStatus || null, job_title: m.jobTitle || null,
+    is_university_student: !!m.isUniversityStudent,
   };
 }
 function mapRemoteToMember(r) {
@@ -223,6 +224,7 @@ function mapRemoteToMember(r) {
     dept1: r.dept1 || "", dept2: r.dept2 || "", dept3: r.dept3 || "",
     photo: r.photo || null,
     occupationStatus: r.occupation_status || "", jobTitle: r.job_title || "",
+    isUniversityStudent: r.is_university_student === true,
   };
 }
 function mapAttendanceToRemote(a, userId) {

@@ -444,6 +444,8 @@ async function importMembersFromWorkbook(file) {
     const dept1 = pick(row, ["ምርጫ 1", "Preference 1", "dept1"]);
     const dept2 = pick(row, ["ምርጫ 2", "Preference 2", "dept2"]);
     const dept3 = pick(row, ["ምርጫ 3", "Preference 3", "dept3"]);
+    const uniRaw = String(pick(row, ["የዩኒቨርሲቲ ተማሪ", "University Student", "isUniversityStudent"]) || "").trim().toLowerCase();
+    const isUni = ["አዎ", "yes", "true", "1", "y"].includes(uniRaw);
     const jobTitleVal = normText(pick(row, ["ሙያ / ሥራ", "ሙያ", "Job", "Job Title", "jobTitle"]));
     const occStatus = normalizeOccupationStatus(pick(row, ["የሥራ ሁኔታ", "Occupation Status", "occupationStatus"])) || (jobTitleVal ? "employed" : "");
 
@@ -468,6 +470,7 @@ async function importMembersFromWorkbook(file) {
         dept3: dept3 ? String(dept3).trim() : "",
         occupationStatus: occStatus,
         jobTitle: occStatus === "employed" ? jobTitleVal : "",
+        isUniversityStudent: isUni,
       };
       existingList.push(member);
     } else {
@@ -490,6 +493,7 @@ async function importMembersFromWorkbook(file) {
       if (dept1) member.dept1 = String(dept1).trim();
       if (dept2) member.dept2 = String(dept2).trim();
       if (dept3) member.dept3 = String(dept3).trim();
+      if (isUni) member.isUniversityStudent = true;
       if (occStatus) {
         member.occupationStatus = occStatus;
         member.jobTitle = occStatus === "employed" ? (jobTitleVal || member.jobTitle || "") : "";
@@ -741,7 +745,9 @@ function groupByOccupation(members) {
 
 // ---------- Dashboard analytics ----------
 async function computeConsecutiveAbsences() {
-  const members = (await getAll("members")).filter((m) => m.active !== false);
+  // university students are mostly away, so they aren't flagged for calls
+  // (see More -> Groups -> University Students)
+  const members = (await getAll("members")).filter((m) => m.active !== false && !m.isUniversityStudent);
   const attendance = await getAll("attendance");
   const sessionDates = [...new Set(attendance.map((a) => a.sessionDate))].sort().reverse();
   const excuseIdx = await loadExcuseIndex();
@@ -763,7 +769,7 @@ async function computeConsecutiveAbsences() {
 }
 
 async function computeProgramSpecificAbsences(programKey) {
-  const members = (await getAll("members")).filter((m) => m.active !== false);
+  const members = (await getAll("members")).filter((m) => m.active !== false && !m.isUniversityStudent);
   const attendance = await getAll("attendance");
   const progAttendance = attendance.filter(a => a.programKey === programKey);
   const sessionDates = [...new Set(progAttendance.map((a) => a.sessionDate))].sort().reverse();
@@ -1906,6 +1912,10 @@ async function renderMembers() {
       <button class="btn-secondary" id="selectAllBtn">${t("members.selectAllShown")}</button>
       <button class="btn-secondary" id="clearSelBtn">${t("members.clearSelection")}</button>
     </div>
+    <div class="toolbar">
+      <button class="btn-secondary" id="docxAllBtn">${getLang() === "am" ? "ሁሉንም መታወቂያ በWord አውርድ" : "⬇ All IDs (Word)"}</button>
+      <button class="btn-secondary" id="docxSelectedBtn">${getLang() === "am" ? "የተመረጡትን በWord አውርድ" : "⬇ Selected IDs (Word)"}</button>
+    </div>
     <input id="memberSearch" class="text-input" placeholder="${t("members.searchPlaceholder")}"/>
     <select id="gradeFilter" class="text-input">
       <option value="">${t("members.allGrades")}</option>
@@ -2023,6 +2033,14 @@ async function renderMembers() {
   };
 
   el("exportMembersBtn").onclick = () => exportMembersExcel(members);
+
+  const preparingLabel = getLang() === "am" ? "በማዘጋጀት ላይ..." : "Preparing...";
+  el("docxAllBtn").onclick = (e) => withButtonLoading(e.currentTarget, preparingLabel, () => downloadIdCardsDocx(members, e.currentTarget));
+  el("docxSelectedBtn").onclick = async (e) => {
+    if (!selected.size) { await showAlert(t("members.noneSelected")); return; }
+    const chosen = members.filter((m) => selected.has(m.id));
+    await withButtonLoading(e.currentTarget, preparingLabel, () => downloadIdCardsDocx(chosen, e.currentTarget));
+  };
 }
 
 window.deleteMember = async (id) => {
@@ -2048,6 +2066,7 @@ window.showQr = async (id) => {
       <div class="row-actions" style="justify-content:center;margin-top:8px;">
         <button class="btn-small" id="qrDownloadBtn">${lang === "am" ? "መታወቂያ አውርድ" : "Download ID"}</button>
         <button class="btn-small" id="qrShareBtn">${lang === "am" ? "መታወቂያ አጋራ" : "Share ID"}</button>
+        <button class="btn-small" id="qrDocxBtn">${lang === "am" ? "በWord አውርድ" : "Download Word"}</button>
       </div>
       <button class="btn-secondary" style="margin-top:10px;" onclick="this.closest('.modal').remove()">${t("members.close")}</button>
     </div>`;
@@ -2063,6 +2082,7 @@ window.showQr = async (id) => {
   el("idCardPreview").appendChild(canvas);
   el("qrDownloadBtn").onclick = () => downloadIdCard(canvas, m.fullName);
   el("qrShareBtn").onclick = () => shareIdCard(canvas, m.fullName);
+  el("qrDocxBtn").onclick = (e) => withButtonLoading(e.currentTarget, lang === "am" ? "በማዘጋጀት ላይ..." : "Preparing...", () => downloadIdCardsDocx([m], null));
 };
 
 // ---------- Full ID card image (photo + QR + name + org), used for both
@@ -2178,6 +2198,106 @@ async function shareIdCard(canvas, name) {
   }, "image/png");
 }
 
+// ---------- ID cards as a Word (.docx) file ----------
+// Same card image as the PNG download (photo + QR + name), laid out like the
+// printed sheet: 2 columns x 4 rows (8 cards) per A4 page with dashed cut
+// lines. A single member gets one card on its own page. Requires the docx
+// library (docx@8 UMD, loaded in index.html and cached by the service worker).
+async function canvasToPngBytes(canvas) {
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+function buildIdCardsDocx(pngList) {
+  const A4 = { width: 11906, height: 16838 }; // twips
+  const MARGIN = 454;                         // 8 mm
+  const margin = { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN };
+  const colW = Math.floor((A4.width - 2 * MARGIN) / 2);
+  const RATIO = 520 / 900;                    // card canvas is 900 x 520
+  const imageRun = (bytes, widthPx) => new docx.ImageRun({
+    data: bytes, type: "png",
+    transformation: { width: widthPx, height: Math.round(widthPx * RATIO) },
+  });
+  // A tiny trailing paragraph keeps Word happy after a table without risking a blank page.
+  const spacer = () => new docx.Paragraph({ spacing: { before: 0, after: 0 }, children: [new docx.TextRun({ text: "", size: 2 })] });
+
+  if (pngList.length === 1) {
+    return new docx.Document({
+      sections: [{
+        properties: { page: { size: A4, margin } },
+        children: [
+          new docx.Paragraph({ alignment: docx.AlignmentType.CENTER, spacing: { before: 600 }, children: [imageRun(pngList[0], 340)] }),
+        ],
+      }],
+    });
+  }
+
+  const dashed = { style: docx.BorderStyle.DASHED, size: 4, color: "999999" };
+  const borders = { top: dashed, bottom: dashed, left: dashed, right: dashed };
+  const cell = (bytes) => new docx.TableCell({
+    width: { size: colW, type: docx.WidthType.DXA },
+    borders,
+    verticalAlign: docx.VerticalAlign.CENTER,
+    margins: { top: 120, bottom: 120, left: 60, right: 60 },
+    children: [new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { before: 0, after: 0 },
+      children: bytes ? [imageRun(bytes, 340)] : [],
+    })],
+  });
+
+  const sections = [];
+  for (let i = 0; i < pngList.length; i += 8) {
+    const page = pngList.slice(i, i + 8);
+    const rows = [];
+    for (let r = 0; r < 4; r++) {
+      const left = page[r * 2], right = page[r * 2 + 1];
+      if (left === undefined && right === undefined) break;
+      rows.push(new docx.TableRow({
+        cantSplit: true,
+        height: { value: 3700, rule: docx.HeightRule.ATLEAST },
+        children: [cell(left), cell(right)],
+      }));
+    }
+    sections.push({
+      properties: { page: { size: A4, margin } },
+      children: [
+        new docx.Table({
+          width: { size: colW * 2, type: docx.WidthType.DXA },
+          columnWidths: [colW, colW],
+          layout: docx.TableLayoutType.FIXED,
+          rows,
+        }),
+        spacer(),
+      ],
+    });
+  }
+  return new docx.Document({ sections });
+}
+
+// One member -> one card; many -> the 8-per-page sheet. `btn` (optional)
+// shows "3/40" progress while the cards are rendered.
+async function downloadIdCardsDocx(members, btn) {
+  const lang = getLang();
+  if (typeof docx === "undefined") {
+    await showAlert(lang === "am" ? "docx ቤተ-መጻሕፍት አልተጫነም — ኢንተርኔት ያረጋግጡ" : "The Word library isn't loaded — check your connection and reopen the app.");
+    return;
+  }
+  if (typeof QRCode === "undefined") { await showAlert("QRCode library not loaded"); return; }
+  if (!members.length) return;
+  const pngs = [];
+  for (let i = 0; i < members.length; i++) {
+    const canvas = await buildIdCardCanvas(members[i]);
+    pngs.push(await canvasToPngBytes(canvas));
+    if (btn && members.length > 1) btn.textContent = `${i + 1}/${members.length}`;
+  }
+  const blob = await docx.Packer.toBlob(buildIdCardsDocx(pngs));
+  const fileName = members.length === 1
+    ? `id-${members[0].fullName.replace(/\s+/g, "_")}.docx`
+    : `ID-cards-${todayISO()}.docx`;
+  downloadBlob(blob, fileName);
+}
+
 async function exportMembersExcel(members) {
   if (typeof XLSX === 'undefined') { await showAlert('XLSX library not loaded'); return; }
   const rows = members.map((m) => ({
@@ -2200,6 +2320,7 @@ async function exportMembersExcel(members) {
     "ምርጫ 2": m.dept2 || "",
     "ምርጫ 3": m.dept3 || "",
     "የሥራ ሁኔታ": occupationLabel(m.occupationStatus, "am"),
+    "የዩኒቨርሲቲ ተማሪ": m.isUniversityStudent ? "አዎ" : "",
     "ሙያ / ሥራ": m.jobTitle || "",
     "የመጨረሻ ንስሃ ቀን": m.lastConfessionDate || "",
     "የተቀላቀሉበት ቀን": m.joinDate || "",
@@ -2966,6 +3087,7 @@ async function renderGroups() {
   if (view === "families") return renderGroupsFamilies();
   if (view === "serviceAttendance") return renderServiceAttendance();
   if (view === "lostMembers") return renderLostMembers();
+  if (view === "universityStudents") return renderUniversityStudents();
   if (view === "excuses") return renderExcuses();
   if (view === "punishments") return renderPunishments();
   if (view === "advice") return renderAdvice();
@@ -2988,6 +3110,7 @@ async function renderGroupsMenu() {
     father: members.filter((m) => normFatherName(m.confessionFather)).length,
     families: families.length,
     lost: members.filter((m) => m.active === false).length,
+    uni: members.filter((m) => m.isUniversityStudent).length,
     perm: distinct(excuses.filter(activeNow)),
     punish: distinct(punishments.filter(activeNow)),
     advised: distinct(advice),
@@ -3003,6 +3126,7 @@ async function renderGroupsMenu() {
       : `${n.employed} employed · ${n.students} students · ${n.unemployed} unemployed`,
     families: lang === "am" ? `${n.families} ቤተሰቦች` : `${n.families} families`,
     lostMembers: lang === "am" ? `${n.lost} የጠፉ` : `${n.lost} lost`,
+    universityStudents: lang === "am" ? `${n.uni} ተማሪዎች` : `${n.uni} students`,
     excuses: lang === "am" ? `${n.perm} በፈቃድ ላይ` : `${n.perm} on permission now`,
     punishments: lang === "am" ? `${n.punish} በቅጣት ላይ` : `${n.punish} on punishment now`,
     advice: lang === "am" ? `${n.advised} አባላት ተመክረዋል` : `${n.advised} members advised`,
@@ -3014,6 +3138,7 @@ async function renderGroupsMenu() {
     { view: "families", icon: "👪", label: lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure" },
     { view: "serviceAttendance", icon: "📋", label: lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance" },
     { view: "lostMembers", icon: "🔍", label: lang === "am" ? "የጠፉ አባላት" : "Lost Members" },
+    { view: "universityStudents", icon: "🎓", label: lang === "am" ? "የዩኒቨርሲቲ ተማሪዎች" : "University Students" },
     { view: "excuses", icon: "🩺", label: lang === "am" ? "ፈቃድ" : "Permissions" },
     { view: "advice", icon: "💬", label: lang === "am" ? "ምክር" : "Advice" },
     { view: "punishments", icon: "⛔", label: lang === "am" ? "ቅጣት" : "Punishments" },
@@ -3104,6 +3229,73 @@ async function renderLostMembers() {
     await showAlert(lang === "am" ? `${changedCount} አባላት ተዘምነዋል` : `${changedCount} member(s) updated`);
     renderLostMembers();
   };
+}
+
+// Marks members as university students (mostly away). Unlike Lost Members this
+// does NOT make anyone inactive: they stay normal members everywhere, are
+// simply not flagged on the absentee call list, and can be added to Service
+// Attendance with its "Add university students" switch.
+async function renderUniversityStudents() {
+  const lang = getLang();
+  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const pending = new Map(members.map((m) => [m.id, !!m.isUniversityStudent]));
+  let markedOnly = false;
+  let currentList = members;
+
+  el("view").innerHTML = `
+    ${groupsBackBtn()}
+    <h3 class="section-title">${lang === "am" ? "የዩኒቨርሲቲ ተማሪዎች" : "University Students"}</h3>
+    <p class="muted">${lang === "am"
+      ? "የተመረጡት አባላት የዩኒቨርሲቲ ተማሪዎች ናቸው (አብዛኛው ጊዜ ከከተማ ውጪ)። ለጥሪ ዝርዝር አይወጡም፤ በአገልግሎት አቴንዳንስ ውስጥ «የዩኒቨርሲቲ ተማሪዎችን ጨምር» ሲበራ ሁሉም ይጨመራሉ። ፕሮግራሞች ላይ ከተገኙ ግን እንደሌሎች አባላት በራስ-ሰር ይካተታሉ።"
+      : "Checked members are university students (mostly away). They're not flagged on the absentee call list, and the Service Attendance \"Add university students\" switch adds all of them. If they do attend programs, they're listed automatically like any other member."}</p>
+    <p class="muted" id="uniSummary"></p>
+    <input id="uniSearch" class="text-input" placeholder="${lang === "am" ? "በስም ፈልግ" : "Search by name"}">
+    <label class="sel-check" style="gap:8px;margin-bottom:10px;"><input type="checkbox" id="uniMarkedOnly"/> ${lang === "am" ? "የተመረጡትን ብቻ አሳይ" : "Show marked only"}</label>
+    <div class="list" id="uniList"></div>
+    <div class="toolbar" style="margin-top:12px;">
+      <button id="uniSaveBtn" class="btn-primary">${t("settings.save")}</button>
+    </div>`;
+
+  function draw() {
+    const q = el("uniSearch").value.trim().toLowerCase();
+    currentList = members.filter((m) => (!q || m.fullName.toLowerCase().includes(q)) && (!markedOnly || pending.get(m.id)));
+    const marked = [...pending.values()].filter(Boolean).length;
+    el("uniSummary").textContent = lang === "am"
+      ? `የዩኒቨርሲቲ ተማሪዎች: ${marked} ከ ${members.length} አባላት`
+      : `University students: ${marked} of ${members.length} members`;
+    el("uniList").innerHTML = currentList.map((m) => `
+      <div class="list-row">
+        <label class="sel-check">
+          <input type="checkbox" data-id="${m.id}" ${pending.get(m.id) ? "checked" : ""}/>
+        </label>
+        <div style="flex:1;">
+          <b>${escapeHtml(m.fullName)}</b><br>
+          <span class="muted">${escapeHtml(m.phone || "")}${m.grade ? " · " + t("members.gradeShort", { n: m.grade }) : ""}${m.address ? " · " + escapeHtml(m.address) : ""}</span>
+        </div>
+        ${pending.get(m.id) ? `<span class="badge badge-amber">${lang === "am" ? "ዩኒቨርሲቲ" : "University"}</span>` : ""}
+      </div>`).join("");
+    el("uniList").querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.onchange = () => { pending.set(cb.dataset.id, cb.checked); draw(); };
+    });
+  }
+
+  el("uniSearch").oninput = draw;
+  el("uniMarkedOnly").onchange = (e) => { markedOnly = e.target.checked; draw(); };
+  el("uniSaveBtn").onclick = async () => {
+    let changed = 0;
+    for (const m of members) {
+      const want = pending.get(m.id);
+      if (want !== !!m.isUniversityStudent) {
+        m.isUniversityStudent = want;
+        m.synced = false;
+        await put("members", m);
+        changed++;
+      }
+    }
+    await showAlert(lang === "am" ? `${changed} አባላት ተዘምነዋል` : `${changed} member(s) updated`);
+    renderUniversityStudents();
+  };
+  draw();
 }
 
 async function renderGroupsDepartments() {
@@ -3300,7 +3492,7 @@ async function renderGroupsFamilies() {
 // means that program isn't part of the criteria at all. A member must
 // satisfy every program with N > 0 (intersection), and match a selected
 // grade if any grades are checked.
-async function computeServiceAttendanceEligible({ courseN, tselotN, mezmurN, mataN = 0, kurbanN = 0, awdeN = 0, grades }) {
+async function computeServiceAttendanceEligible({ courseN, tselotN, mezmurN, mataN = 0, kurbanN = 0, awdeN = 0, grades, includeUniversity = false }) {
   const members = (await getAll("members")).filter((m) => m.active !== false);
   const attendance = await getAll("attendance");
   const byGrade = grades && grades.length ? members.filter((m) => grades.includes(m.grade)) : members;
@@ -3337,6 +3529,16 @@ async function computeServiceAttendanceEligible({ courseN, tselotN, mezmurN, mat
     if (ok) mem._viaPermission = viaPermission;
     return ok;
   });
+  // University students are mostly away but still have a right to be on the
+  // list. By default they're treated like any other member (listed only if
+  // they meet the criteria, e.g. they attend). With "Add university students"
+  // on, every marked student is added regardless of criteria or grade filter.
+  if (includeUniversity) {
+    const have = new Set(results.map((m) => m.id));
+    for (const mem of members) {
+      if (mem.isUniversityStudent && !have.has(mem.id)) { mem._addedUniversity = true; results.push(mem); }
+    }
+  }
   // Members who meet the criteria but are currently on punishment are held back.
   const punishedIds = await loadActivePunishedIds();
   const finalList = results.filter((mem) => !punishedIds.has(mem.id));
@@ -3353,7 +3555,8 @@ function ethShortDate(iso) {
 
 async function renderServiceAttendance() {
   const lang = getLang();
-  const state = window._svcAttnState || { courseN: 0, tselotN: 0, mezmurN: 0, mataN: 0, kurbanN: 0, awdeN: 0, grades: [], holiday: "" };
+  const uniMarked = (await getAll("members")).filter((m) => m.isUniversityStudent && m.active !== false).length;
+  const state = window._svcAttnState || { courseN: 0, tselotN: 0, mezmurN: 0, mataN: 0, kurbanN: 0, awdeN: 0, includeUni: false, grades: [], holiday: "" };
   window._svcAttnState = state;
 
   el("view").innerHTML = `
@@ -3385,6 +3588,11 @@ async function renderServiceAttendance() {
       `).join("")}
     </div>
 
+    <label class="sel-check" style="gap:8px;margin:12px 0 4px;"><input type="checkbox" id="svc_uni" ${state.includeUni ? "checked" : ""}/> ${lang === "am" ? "የዩኒቨርሲቲ ተማሪዎችን ጨምር" : "Add university students"} (${uniMarked})</label>
+    <p class="muted" style="margin:0 0 10px;">${lang === "am"
+      ? "ጠፍቶ፦ ተማሪዎቹ እንደሌሎች አባላት መስፈርቱን ካሟሉ (ለምሳሌ ከተገኙ) ብቻ ይካተታሉ። በርቶ፦ ሁሉም የተመዘገቡ የዩኒቨርሲቲ ተማሪዎች ይጨመራሉ።"
+      : "Off: they're listed only if they meet the criteria like any other member (e.g. they attend). On: every marked university student is added."}</p>
+
     <label>${lang === "am" ? "የምን አመታዊ በዓል ነው?" : "Which annual holiday is this?"}</label>
     <input id="svc_holiday" class="text-input" placeholder="${lang === "am" ? "ለምሳሌ የመድኃኔዓለም" : "e.g. Medhanialem"}" value="${state.holiday}">
 
@@ -3412,7 +3620,8 @@ async function renderServiceAttendance() {
     state.kurbanN = Number(el("svc_kurban").value) || 0;
     state.awdeN = Number(el("svc_awde").value) || 0;
     state.holiday = el("svc_holiday").value;
-    eligible = await computeServiceAttendanceEligible({ courseN: state.courseN, tselotN: state.tselotN, mezmurN: state.mezmurN, mataN: state.mataN, kurbanN: state.kurbanN, awdeN: state.awdeN, grades: state.grades });
+    state.includeUni = el("svc_uni").checked;
+    eligible = await computeServiceAttendanceEligible({ courseN: state.courseN, tselotN: state.tselotN, mezmurN: state.mezmurN, mataN: state.mataN, kurbanN: state.kurbanN, awdeN: state.awdeN, grades: state.grades, includeUniversity: state.includeUni });
     const viaCount = eligible.filter((m) => m._viaPermission).length;
     const countBase = lang === "am"
       ? `በመስፈርቶቹ መሠረት ${eligible.length} ብቁ አባላት አሉ`
@@ -3420,6 +3629,7 @@ async function renderServiceAttendance() {
     const heldBack = eligible.punishedCount || 0;
     el("svc_count").textContent = countBase
       + (viaCount ? (lang === "am" ? ` (${viaCount} በፈቃድ)` : ` (${viaCount} of them by permission)`) : "")
+      + (eligible.filter((m) => m._addedUniversity).length ? (lang === "am" ? ` · ${eligible.filter((m) => m._addedUniversity).length} የዩኒቨርሲቲ ተማሪዎች ተጨምረዋል` : ` · ${eligible.filter((m) => m._addedUniversity).length} university students added`) : "")
       + (heldBack ? (lang === "am" ? ` · ${heldBack} በቅጣት ላይ ስለሆኑ አልተካተቱም` : ` · ${heldBack} left out (on punishment)`) : "");
     const genBtn = el("svc_generateBtn");
     genBtn.disabled = !state.holiday.trim() || eligible.length === 0;
@@ -3432,6 +3642,7 @@ async function renderServiceAttendance() {
   el("svc_kurban").oninput = refreshCount;
   el("svc_awde").oninput = refreshCount;
   el("svc_holiday").oninput = refreshCount;
+  el("svc_uni").onchange = refreshCount;
   el("svc_generateBtn").onclick = () => {
     if (!eligible.length) return;
     const btn = el("svc_generateBtn");

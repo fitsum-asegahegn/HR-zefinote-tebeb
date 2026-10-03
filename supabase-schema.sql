@@ -42,6 +42,9 @@
 -- If you're picking up roles & permissions (pending / scanner / member /
 -- admin), run ONLY supabase-permissions-migration.sql from this folder.
 --
+-- If you're picking up University Students, run ONLY supabase-university-migration.sql
+-- from this folder (BEFORE deploying the new app files).
+--
 -- If you're picking up Occupation (employed/student/unemployed + job title), run ONLY
 -- supabase-occupation-migration.sql from this folder (BEFORE deploying the new app files).
 --
@@ -89,6 +92,7 @@ create table if not exists members (
   photo text, -- small compressed JPEG data URL (see resizeImageFile in app.js)
   occupation_status text, -- 'employed' | 'student' | 'unemployed'
   job_title text, -- free text, used when employed
+  is_university_student boolean default false, -- mostly away; see University Students section
   deleted_at timestamptz, -- soft-delete tombstone; see "Synced deletes" below
   updated_at timestamptz default now()
 );
