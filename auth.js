@@ -293,6 +293,13 @@ function mapRemoteToAdvice(r) {
   };
 }
 
+function mapDutyToRemote(x) {
+  return { id: x.id, duty_date: x.date, kind: x.kind, role: x.role, member_id: x.memberId, created_by_name: x.createdBy || null };
+}
+function mapRemoteToDuty(r) {
+  return { id: r.id, date: r.duty_date, kind: r.kind, role: r.role, memberId: r.member_id, createdBy: r.created_by_name || "", synced: true };
+}
+
 async function syncNow() {
   const statusEl = el("syncStatus");
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
@@ -358,6 +365,13 @@ async function syncNow() {
       if (pendingAdvice.length) {
         const { error } = await sbClient.from("advice").upsert(pendingAdvice.map(mapAdviceToRemote));
         if (!error) for (const x of pendingAdvice) { x.synced = true; await put("advice", x); }
+      }
+      // push duty roster history (keeps the rotation fair across devices)
+      const dutyAll = await getAll("dutyAssignments");
+      const pendingDuty = dutyAll.filter((x) => !x.synced);
+      if (pendingDuty.length) {
+        const { error } = await sbClient.from("duty_assignments").upsert(pendingDuty.map(mapDutyToRemote));
+        if (!error) for (const x of pendingDuty) { x.synced = true; await put("dutyAssignments", x); }
       }
     }
     // push attendance (all roles)
@@ -463,6 +477,18 @@ async function syncNow() {
           await put("advice", existing ? { ...existing, ...mapped } : mapped);
         }
         await setSetting("lastPulledAdviceAt", pullStartedAt);
+      }
+
+      const sinceDuty = settings.lastPulledDutyAt || "1970-01-01T00:00:00Z";
+      const { data: remoteDuty } = await sbClient.from("duty_assignments").select("*").gt("updated_at", sinceDuty);
+      if (remoteDuty) {
+        for (const rd of remoteDuty) {
+          if (rd.deleted_at) { await del("dutyAssignments", rd.id); continue; }
+          const existing = await get("dutyAssignments", rd.id);
+          const mapped = mapRemoteToDuty(rd);
+          await put("dutyAssignments", existing ? { ...existing, ...mapped } : mapped);
+        }
+        await setSetting("lastPulledDutyAt", pullStartedAt);
       }
     }
     await setSetting("lastPulledAt", pullStartedAt);

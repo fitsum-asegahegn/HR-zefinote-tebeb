@@ -42,6 +42,9 @@
 -- If you're picking up roles & permissions (pending / scanner / member /
 -- admin), run ONLY supabase-permissions-migration.sql from this folder.
 --
+-- If you're picking up the Duty Roster (ምደባ), run ONLY supabase-duty-migration.sql
+-- from this folder.
+--
 -- If you're picking up University Students, run ONLY supabase-university-migration.sql
 -- from this folder (BEFORE deploying the new app files).
 --
@@ -455,4 +458,37 @@ create policy "role read advice" on advice
 create policy "role insert advice" on advice
   for insert with check (app_role() in ('member','admin'));
 create policy "role update advice" on advice
+  for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
+
+-- ---------------------------------------------------------------------
+-- Duty roster history (ምደባ). Needs the roles migration first (uses app_role()).
+-- One row per person assigned to a Sunday Kurban-coordination list or a
+-- Monday Awde Mihret service, so the weekly rotation stays fair across
+-- devices. Only members and admins can see or change these. Removing a
+-- roster is a soft-delete (deleted_at) so other devices can pull it.
+create table if not exists duty_assignments (
+  id uuid primary key,
+  duty_date date not null,
+  kind text not null,   -- 'kurban' | 'awde'
+  role text not null,   -- coordinator | student | prayer | singer | stage
+  member_id uuid not null references members(id) on delete cascade,
+  created_by_name text,
+  deleted_at timestamptz,
+  updated_at timestamptz default now()
+);
+
+drop trigger if exists trg_duty_updated on duty_assignments;
+create trigger trg_duty_updated before update on duty_assignments
+  for each row execute procedure set_updated_at();
+
+alter table duty_assignments enable row level security;
+
+drop policy if exists "role read duty_assignments" on duty_assignments;
+drop policy if exists "role insert duty_assignments" on duty_assignments;
+drop policy if exists "role update duty_assignments" on duty_assignments;
+create policy "role read duty_assignments" on duty_assignments
+  for select using (app_role() in ('member','admin'));
+create policy "role insert duty_assignments" on duty_assignments
+  for insert with check (app_role() in ('member','admin'));
+create policy "role update duty_assignments" on duty_assignments
   for update using (app_role() in ('member','admin')) with check (app_role() in ('member','admin'));
