@@ -480,7 +480,7 @@ async function importMembersFromWorkbook(file) {
       // Update existing member
       if (phone) member.phone = String(phone).trim();
       if (category) member.category = String(category).trim();
-      if (grade !== null) member.grade = grade;
+      if (grade !== null && !member.portalCode) member.grade = grade; // portal grade wins once linked
       if (confDate) member.lastConfessionDate = confDate;
       if (christianName) member.christianName = String(christianName).trim();
       if (gender) member.gender = String(gender).trim();
@@ -507,6 +507,56 @@ async function importMembersFromWorkbook(file) {
     count++;
   }
   return count;
+}
+
+// ---------- School portal link ----------
+// The portal (temehert-kefel-portal) exports "Students" with: Student ID |
+// Student name | Grade | Section | First password. Importing links each row to an
+// HR member (by portal ID, else by exact name) and stores portalCode,
+// portalPassword (blank once the student changed it) and the portal's grade.
+// These two fields stay on this device only: they are not synced to Supabase
+// and portalPassword is stripped from the JSON backup.
+const normName = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+async function importPortalList(file) {
+  if (typeof XLSX === "undefined") { await showAlert("XLSX library not loaded"); return null; }
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" })
+    .filter((r) => String(r["Student ID"] || r["Student name"] || "").trim());
+
+  const members = await getAll("members");
+  const byCode = new Map(members.filter((m) => m.portalCode).map((m) => [m.portalCode.toUpperCase(), m]));
+  const byName = new Map(), hrDup = new Set();
+  members.forEach((m) => {
+    const k = normName(m.fullName);
+    if (byName.has(k)) hrDup.add(k); else byName.set(k, m);
+  });
+  const portalCount = new Map();
+  rows.forEach((r) => { const k = normName(r["Student name"]); portalCount.set(k, (portalCount.get(k) || 0) + 1); });
+
+  let linked = 0;
+  const unmatched = [], ambiguous = [], seen = new Set();
+  for (const r of rows) {
+    const code = String(r["Student ID"] || "").trim().toUpperCase();
+    const name = String(r["Student name"] || "").trim();
+    let m = code ? byCode.get(code) : null;
+    if (!m) {
+      const k = normName(name);
+      if (hrDup.has(k) || portalCount.get(k) > 1) { ambiguous.push(`${name} (${code})`); continue; }
+      m = byName.get(k);
+    }
+    if (!m) { unmatched.push(name || code); continue; }
+    if (seen.has(m.id)) { ambiguous.push(`${name} (${code})`); continue; }
+
+    const g = normalizeGrade(r["Grade"]);
+    m.portalCode = code;
+    if (g) m.grade = g;                                              // portal grade wins
+    m.portalPassword = String(r["First password"] || "").trim();     // blank = student already changed it; clears any stale one
+    m.synced = false;
+    await put("members", m);
+    seen.add(m.id); linked++;
+  }
+  return { linked, unmatched, ambiguous, notInPortal: members.filter((m) => !seen.has(m.id)).length };
 }
 
 function parseExcelDate(v) {
@@ -584,6 +634,7 @@ async function addMemberManual(fullName, phone, category, grade, extras = {}) {
     photo: extras.photo || null,
     occupationStatus: extras.occupationStatus || "",
     jobTitle: extras.jobTitle || "",
+    portalCode: (extras.portalCode || "").toUpperCase(),
   };
   await put("members", member);
   return member;
@@ -1165,7 +1216,8 @@ async function generateHrReportPptx(data) {
 // ---------- JSON export/import ----------
 async function exportScansJSON() {
   const attendance = await getAll("attendance");
-  const members = await getAll("members");
+  // the portal first-password must never end up in a backup file
+  const members = (await getAll("members")).map(({ portalPassword, ...rest }) => rest);
   const excuses = await getAll("excuses");
   const punishments = await getAll("punishments");
   const advice = await getAll("advice");
@@ -1908,6 +1960,7 @@ async function renderMembers() {
       <label class="btn-primary file-btn">${t("members.importExcel")}<input type="file" id="excelInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
       <button class="btn-secondary" id="addMemberBtn">${t("members.addMember")}</button>
       <button class="btn-secondary" id="exportMembersBtn">${t("members.exportExcel")}</button>
+      <label class="btn-secondary file-btn">${getLang() === "am" ? "ከፖርታል አስመጣ" : "Import portal list"}<input type="file" id="portalInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
     </div>
     <div class="toolbar">
       <button class="btn-secondary" id="printQrBtn">${t("members.printAllQr")}</button>
@@ -1967,6 +2020,7 @@ async function renderMembers() {
             ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}
             ${m.christianName ? "· የክርስትና ስም: " + m.christianName : ""}
             ${m.address ? "· " + m.address : ""}
+            ${m.portalCode ? "· " + escapeHtml(m.portalCode) : ""}
           </span>
         </div>
         <div class="row-actions">
@@ -2022,6 +2076,22 @@ async function renderMembers() {
     if (!file) return;
     const count = await importMembersFromWorkbook(file);
     await showAlert(t("members.importedCount", { n: count }));
+    renderMembers();
+  };
+
+  el("portalInput").onchange = async (e) => {
+    const file = e.target.files[0]; e.target.value = "";
+    if (!file) return;
+    const am = getLang() === "am";
+    const r = await importPortalList(file);
+    if (!r) return;
+    const list = (a) => (a.length ? "\n" + a.slice(0, 10).map(escapeHtml).join(", ") : "");
+    await showAlert(
+      `${am ? "የተገናኙ" : "Linked"}: ${r.linked}` +
+      `\n${am ? "በሰው ሀብት ውስጥ ያልተገኙ" : "Not found in HR"}: ${r.unmatched.length}${list(r.unmatched)}` +
+      `\n${am ? "ተመሳሳይ ስም (ተዘለዋል)" : "Same-name conflicts (skipped)"}: ${r.ambiguous.length}${list(r.ambiguous)}` +
+      `\n${am ? "በፖርታል ውስጥ የሌሉ የሰው ሀብት አባላት" : "HR members with no portal record"}: ${r.notInPortal}`
+    );
     renderMembers();
   };
 
@@ -2231,7 +2301,26 @@ async function buildIdCardCanvas(member) {
   if (member.christianName) {
     ctx.fillStyle = "#777777";
     ctx.font = "19px 'Noto Sans Ethiopic', sans-serif";
-    wrapCanvasText(ctx, member.christianName, mx, y, mw, 26, 2);
+    wrapCanvasText(ctx, member.christianName, mx, y, mw, 26, member.portalCode ? 1 : 2);
+  }
+
+  // school-portal login: ID + first password (or a note once the student chose their own)
+  if (member.portalCode) {
+    const base = py + ph;
+    ctx.fillStyle = "#777777";
+    ctx.font = "14px 'Noto Sans Ethiopic', sans-serif";
+    ctx.fillText(lang === "am" ? "የፖርታል መግቢያ" : "Portal login", mx, base - 74);
+    ctx.fillStyle = "#1a1410";
+    ctx.font = "bold 22px 'JetBrains Mono', monospace";
+    ctx.fillText(member.portalCode, mx, base - 48);
+    if (member.portalPassword) {
+      ctx.font = "bold 18px 'JetBrains Mono', monospace";
+      ctx.fillText((lang === "am" ? "የይለፍ ቃል: " : "Password: ") + member.portalPassword, mx, base - 20);
+    } else {
+      ctx.fillStyle = "#666666";
+      ctx.font = "15px 'Noto Sans Ethiopic', sans-serif";
+      ctx.fillText(lang === "am" ? "የይለፍ ቃል: ተቀይሯል" : "Password: set by student", mx, base - 20);
+    }
   }
 
   return canvas;
@@ -2408,7 +2497,7 @@ async function printAllQr(members) {
       card.appendChild(qrHalf);
       const infoHalf = document.createElement("div");
       infoHalf.className = "info-half";
-      infoHalf.innerHTML = `<div class="photo-box">${m.photo ? `<img src="${m.photo}" style="width:100%;height:100%;object-fit:cover;">` : ""}</div><div class="id-name">${m.fullName}</div><div class="id-org">${m.grade ? t("members.gradeShort", { n: m.grade }) + " · " : ""}ፍኖተ ጥበብ ሰ/ት/ቤት</div>`;
+      infoHalf.innerHTML = `<div class="photo-box">${m.photo ? `<img src="${m.photo}" style="width:100%;height:100%;object-fit:cover;">` : ""}</div><div class="id-name">${m.fullName}</div><div class="id-org">${m.grade ? t("members.gradeShort", { n: m.grade }) + " · " : ""}ፍኖተ ጥበብ ሰ/ት/ቤት</div>${m.portalCode ? `<div class="id-org" style="font-weight:700;color:#000;">${escapeHtml(m.portalCode)} · ${escapeHtml(m.portalPassword || (getLang() === "am" ? "ተቀይሯል" : "own password"))}</div>` : ""}`;
       card.appendChild(infoHalf);
       page.appendChild(card);
       new QRCode(qrHalf, { text: m.qrId, width: 240, height: 240 });
@@ -2488,7 +2577,9 @@ window.openRegistrationModal = async function(editId) {
         <label>${t("members.spiritualEducation")}</label>
         <input id="f_spiritualEducation" class="text-input" value="${member?.spiritualEducation||''}">
         <label>${t("members.grade")}</label>
-        <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}">
+        <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}" ${member?.portalCode ? "disabled" : ""}>
+        <label>${getLang() === "am" ? "የፖርታል መታወቂያ" : "Portal ID"}</label>
+        <input id="f_portalCode" class="text-input" placeholder="FTS/27/0142" value="${escapeHtml(member?.portalCode || "")}">
 
         ${sectionTitle(getLang() === "am" ? "የሥራ ሁኔታ" : "Occupation")}
         <label>${getLang() === "am" ? "የሥራ ሁኔታ" : "Status"}</label>
@@ -2562,6 +2653,7 @@ window.openRegistrationModal = async function(editId) {
       educationLevel: el("f_educationLevel").value.trim(),
       spiritualEducation: el("f_spiritualEducation").value.trim(),
       grade: el("f_grade").value.trim(),
+      portalCode: el("f_portalCode").value.trim().toUpperCase(),
       category: el("f_assignedDept").value.trim(),
       dept1: el("f_dept1").value,
       dept2: el("f_dept2").value,
@@ -2572,6 +2664,10 @@ window.openRegistrationModal = async function(editId) {
     };
 
     if (!data.fullName) { await showAlert(t("members.fullNameRequired")); return; }
+    if (data.portalCode) {
+      const clash = (await getAll("members")).find((x) => x.id !== (member && member.id) && (x.portalCode || "").toUpperCase() === data.portalCode);
+      if (clash) { await showAlert((getLang() === "am" ? "ይህ የፖርታል መታወቂያ ቀድሞ ለ" : "That portal ID is already linked to ") + escapeHtml(clash.fullName)); return; }
+    }
 
     if (isEdit) {
       const m = await get("members", member.id);
@@ -2591,6 +2687,8 @@ window.openRegistrationModal = async function(editId) {
       m.educationLevel = data.educationLevel;
       m.spiritualEducation = data.spiritualEducation;
       m.grade = data.grade ? normalizeGrade(data.grade) : null;
+      if ((m.portalCode || "") !== data.portalCode) m.portalPassword = ""; // a different ID can't keep the old first password
+      m.portalCode = data.portalCode;
       m.category = data.category;
       m.dept1 = data.dept1;
       m.dept2 = data.dept2;
