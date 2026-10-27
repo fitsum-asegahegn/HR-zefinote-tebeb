@@ -42,6 +42,9 @@ async function importMembersFromWorkbook(file) {
     const category = pick(row, ["የሚያገለግሉበት ክፍል", "Assigned Department", "category"]);
     const gradeRaw = pick(row, ["ክፍል ደረጃ", "ክፍል", "Grade", "grade"]);
     const grade = normalizeGrade(gradeRaw);
+    // children's-department users may only import grades 1..CHILDREN_MAX_GRADE
+    if (isChildrenRole() && !(grade >= 1 && grade <= CHILDREN_MAX_GRADE)) continue;
+    const sectionVal = SECTION_GRADES.includes(grade) ? normalizeSection(pick(row, ["ክፍለ ክፍል", "ሴክሽን", "Section", "section"])) : "";
     const confDate = parseExcelDate(pick(row, ["ንስሃ ቀን", "የመጨረሻ ንስሃ", "Last Confession", "lastConfession"]));
     const christianName = pick(row, ["የክርስትና ስም", "Christian Name", "christianName"]);
     const gender = pick(row, ["ጾታ", "Gender", "gender"]);
@@ -84,6 +87,7 @@ async function importMembersFromWorkbook(file) {
         occupationStatus: occStatus,
         jobTitle: occStatus === "employed" ? jobTitleVal : "",
         isUniversityStudent: isUni,
+        section: sectionVal,
       };
       existingList.push(member);
     } else {
@@ -107,6 +111,7 @@ async function importMembersFromWorkbook(file) {
       if (dept2) member.dept2 = String(dept2).trim();
       if (dept3) member.dept3 = String(dept3).trim();
       if (isUni) member.isUniversityStudent = true;
+      if (sectionVal) member.section = sectionVal;
       if (occStatus) {
         member.occupationStatus = occStatus;
         member.jobTitle = occStatus === "employed" ? (jobTitleVal || member.jobTitle || "") : "";
@@ -242,6 +247,7 @@ async function addMemberManual(fullName, phone, category, grade, extras = {}) {
     dept2: extras.dept2 || "",
     dept3: extras.dept3 || "",
     photo: extras.photo || null,
+    section: SECTION_GRADES.includes(normalizeGrade(grade)) ? normalizeSection(extras.section) : "",
     occupationStatus: extras.occupationStatus || "",
     jobTitle: extras.jobTitle || "",
     portalCode: (extras.portalCode || "").toUpperCase(),
@@ -250,9 +256,18 @@ async function addMemberManual(fullName, phone, category, grade, extras = {}) {
   return member;
 }
 
+// ---------- Sections (grades 5 and 6 are split into ሀ and ለ) ----------
+const SECTION_GRADES = [5, 6];
+function normalizeSection(v) {
+  const s = String(v == null ? "" : v).trim().toLowerCase();
+  if (["ሀ", "ሃ", "a", "1"].includes(s)) return "ሀ";
+  if (["ለ", "b", "2"].includes(s)) return "ለ";
+  return "";
+}
+
 // ---------- Members ----------
 async function renderMembers() {
-  const members = (await getAll("members")).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const members = (await getVisibleMembers()).sort((a, b) => a.fullName.localeCompare(b.fullName));
   const selected = new Set();
   const confessionFatherGroups = groupByConfessionFather(members);
 
@@ -261,7 +276,7 @@ async function renderMembers() {
       <label class="btn-primary file-btn">${t("members.importExcel")}<input type="file" id="excelInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
       <button class="btn-secondary" id="addMemberBtn">${t("members.addMember")}</button>
       <button class="btn-secondary" id="exportMembersBtn">${t("members.exportExcel")}</button>
-      <label class="btn-secondary file-btn">${getLang() === "am" ? "ከፖርታል አስመጣ" : "Import portal list"}<input type="file" id="portalInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
+      <label class="btn-secondary file-btn" style="${isChildrenRole() ? "display:none;" : ""}">${getLang() === "am" ? "ከፖርታል አስመጣ" : "Import portal list"}<input type="file" id="portalInput" accept=".xlsx,.xls,.csv" style="display:none;"/></label>
     </div>
     <div class="toolbar">
       <button class="btn-secondary" id="printQrBtn">${t("members.printAllQr")}</button>
@@ -277,8 +292,15 @@ async function renderMembers() {
     <input id="memberSearch" class="text-input" placeholder="${t("members.searchPlaceholder")}"/>
     <select id="gradeFilter" class="text-input">
       <option value="">${t("members.allGrades")}</option>
-      ${Array.from({ length: 12 }, (_, i) => i + 1).map((g) => `<option value="${g}">${t("members.gradeShort", { n: g })}</option>`).join("")}
+      ${Array.from({ length: isChildrenRole() ? CHILDREN_MAX_GRADE : 12 }, (_, i) => i + 1).map((g) => `<option value="${g}">${t("members.gradeShort", { n: g })}</option>`).join("")}
     </select>
+    <div class="toolbar" style="margin-bottom:0;">
+      <select id="sectionFilter" class="text-input">
+        <option value="">${getLang() === "am" ? "ሁሉም ክፍለ ክፍሎች (ሀ/ለ)" : "All sections (ሀ/ለ)"}</option>
+        <option value="ሀ">ሀ</option>
+        <option value="ለ">ለ</option>
+      </select>
+    </div>
     <div class="toolbar" style="margin-bottom:0;">
       <select id="confessionFatherFilter" class="text-input">
         <option value="">${getLang() === "am" ? "ሁሉም የንስሐ አባቶች" : "All confession fathers"}</option>
@@ -318,7 +340,7 @@ async function renderMembers() {
           <span class="muted">
             ${m.phone || ""}
             ${m.category ? "· " + m.category : ""}
-            ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) : ""}
+            ${m.grade ? "· " + t("members.gradeShort", { n: m.grade }) + (m.section ? " " + escapeHtml(m.section) : "") : ""}
             ${m.christianName ? "· የክርስትና ስም: " + m.christianName : ""}
             ${m.address ? "· " + m.address : ""}
             ${m.portalCode ? "· " + escapeHtml(m.portalCode) : ""}
@@ -343,11 +365,12 @@ async function renderMembers() {
     const lang = getLang();
     const q = el("memberSearch").value.toLowerCase();
     const g = el("gradeFilter").value;
+    const sec = el("sectionFilter").value;
     const areaBaseRaw = el("areaCodeFilter").value;
     const countEl = el("areaCodeCount");
     const cf = el("confessionFatherFilter").value;
     const ph = el("photoFilter").value;
-    let filtered = members.filter((m) => m.fullName.toLowerCase().includes(q) && (g === "" || String(m.grade) === g) && (cf === "" || confessionFatherKey(m.confessionFather) === cf) && (ph === "" || (ph === "with" ? !!m.photo : !m.photo)));
+    let filtered = members.filter((m) => m.fullName.toLowerCase().includes(q) && (g === "" || String(m.grade) === g) && (sec === "" || (m.section || "") === sec) && (cf === "" || confessionFatherKey(m.confessionFather) === cf) && (ph === "" || (ph === "with" ? !!m.photo : !m.photo)));
     if (areaBaseRaw !== "") {
       const base = Number(areaBaseRaw);
       const upper = base + 99;
@@ -368,6 +391,7 @@ async function renderMembers() {
   draw(members);
   el("memberSearch").oninput = applyFilters;
   el("gradeFilter").onchange = applyFilters;
+  el("sectionFilter").onchange = applyFilters;
   el("confessionFatherFilter").onchange = applyFilters;
   el("photoFilter").onchange = applyFilters;
   el("areaCodeFilter").oninput = applyFilters;
@@ -459,6 +483,7 @@ async function exportMembersExcel(members) {
     "የዘመናዊ ትምህርት ደረጃ": m.educationLevel || "",
     "በመንፈሳዊ የትምህርት ደረጃ": m.spiritualEducation || "",
     "ክፍል ደረጃ": m.grade || "",
+    "ክፍለ ክፍል": m.section || "",
     "የሚያገለግሉበት ክፍል": m.category || "",
     "ምርጫ 1": m.dept1 || "",
     "ምርጫ 2": m.dept2 || "",
@@ -548,7 +573,17 @@ window.openRegistrationModal = async function(editId) {
         <label>${t("members.spiritualEducation")}</label>
         <input id="f_spiritualEducation" class="text-input" value="${member?.spiritualEducation||''}">
         <label>${t("members.grade")}</label>
-        <input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}" ${member?.portalCode ? "disabled" : ""}>
+        ${isChildrenRole()
+          ? `<select id="f_grade" class="text-input" ${member?.portalCode ? "disabled" : ""}><option value="">---</option>${Array.from({ length: CHILDREN_MAX_GRADE }, (_, i) => i + 1).map((g) => `<option value="${g}" ${member?.grade === g ? "selected" : ""}>${g}</option>`).join("")}</select>`
+          : `<input id="f_grade" type="number" class="text-input" placeholder="1-12" value="${member?.grade||''}" ${member?.portalCode ? "disabled" : ""}>`}
+        <div id="f_sectionWrap" style="display:none;">
+          <label>${getLang() === "am" ? "ክፍለ ክፍል (ሀ / ለ)" : "Section (ሀ / ለ)"}</label>
+          <select id="f_section" class="text-input">
+            <option value="">---</option>
+            <option value="ሀ" ${member?.section === "ሀ" ? "selected" : ""}>ሀ</option>
+            <option value="ለ" ${member?.section === "ለ" ? "selected" : ""}>ለ</option>
+          </select>
+        </div>
         <label>${getLang() === "am" ? "የፖርታል መታወቂያ" : "Portal ID"}</label>
         <input id="f_portalCode" class="text-input" placeholder="FTS/27/0142" value="${escapeHtml(member?.portalCode || "")}">
 
@@ -585,6 +620,13 @@ window.openRegistrationModal = async function(editId) {
   document.body.appendChild(box);
 
   let photoDataUrl = member?.photo || null;
+  const syncSectionBox = () => {
+    const g = parseInt(el("f_grade").value, 10);
+    el("f_sectionWrap").style.display = SECTION_GRADES.includes(g) ? "block" : "none";
+  };
+  el("f_grade").oninput = syncSectionBox;
+  el("f_grade").onchange = syncSectionBox;
+  syncSectionBox();
   el("f_occStatus").onchange = () => { el("f_jobWrap").style.display = el("f_occStatus").value === "employed" ? "block" : "none"; };
   el("f_photoInput").onchange = async (e) => {
     const file = e.target.files[0];
@@ -624,6 +666,7 @@ window.openRegistrationModal = async function(editId) {
       educationLevel: el("f_educationLevel").value.trim(),
       spiritualEducation: el("f_spiritualEducation").value.trim(),
       grade: el("f_grade").value.trim(),
+      section: normalizeSection(el("f_section").value),
       portalCode: el("f_portalCode").value.trim().toUpperCase(),
       category: el("f_assignedDept").value.trim(),
       dept1: el("f_dept1").value,
@@ -635,6 +678,17 @@ window.openRegistrationModal = async function(editId) {
     };
 
     if (!data.fullName) { await showAlert(t("members.fullNameRequired")); return; }
+    const gNum = data.grade ? normalizeGrade(data.grade) : null;
+    const am = getLang() === "am";
+    if (isChildrenRole() && !(gNum >= 1 && gNum <= CHILDREN_MAX_GRADE)) {
+      await showAlert(am ? `ክፍል ከ1 እስከ ${CHILDREN_MAX_GRADE} ብቻ መሆን አለበት` : `Grade must be between 1 and ${CHILDREN_MAX_GRADE}.`);
+      return;
+    }
+    if (!SECTION_GRADES.includes(gNum)) data.section = ""; // sections only exist for grades 5 and 6
+    else if (!data.section && (!isEdit || isChildrenRole())) {
+      await showAlert(am ? "ለክፍል 5 እና 6 ክፍለ ክፍል (ሀ ወይም ለ) ይምረጡ" : "Pick a section (ሀ or ለ) for grades 5 and 6.");
+      return;
+    }
     if (data.portalCode) {
       const clash = (await getAll("members")).find((x) => x.id !== (member && member.id) && (x.portalCode || "").toUpperCase() === data.portalCode);
       if (clash) { await showAlert((getLang() === "am" ? "ይህ የፖርታል መታወቂያ ቀድሞ ለ" : "That portal ID is already linked to ") + escapeHtml(clash.fullName)); return; }
@@ -658,6 +712,7 @@ window.openRegistrationModal = async function(editId) {
       m.educationLevel = data.educationLevel;
       m.spiritualEducation = data.spiritualEducation;
       m.grade = data.grade ? normalizeGrade(data.grade) : null;
+      m.section = data.section;
       if ((m.portalCode || "") !== data.portalCode) m.portalPassword = ""; // a different ID can't keep the old first password
       m.portalCode = data.portalCode;
       m.category = data.category;

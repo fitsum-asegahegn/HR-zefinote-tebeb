@@ -1,10 +1,11 @@
-const CACHE = "finote-attendance-v70";
+const CACHE = "finote-attendance-v72";
 
 const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
   "./roster.js",
+  "./attendance-edit.js",
   "./discipline.js",
   "./groups.js",
   "./reports.js",
@@ -146,7 +147,7 @@ async function backgroundSyncAttendance() {
     if (!url || !key || !token) return;
 
     const attendance = await swGetAll(db, "attendance");
-    const pending = attendance.filter((a) => !a.synced);
+    const pending = attendance.filter((a) => !a.synced && !a.pendingEdit);
     if (pending.length) {
       const body = pending.map((a) => ({
         id: a.id, member_id: a.memberId, program_key: a.programKey, session_date: a.sessionDate,

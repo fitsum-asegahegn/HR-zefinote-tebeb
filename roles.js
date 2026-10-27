@@ -18,16 +18,22 @@
 // Offline-only mode (no Supabase configured) treats everyone as a member,
 // never an admin. The real enforcement is the RLS policies in
 // supabase-schema.sql; everything here only decides what the UI shows.
-const VALID_ROLES = ["pending", "scanner", "member", "admin"];
+const VALID_ROLES = ["pending", "scanner", "children", "member", "admin"];
+// "children" (ሕጻናት ክፍል): sits between scanner and member. Can scan, and can
+// add/edit/see members of grades 1-CHILDREN_MAX_GRADE only. The database
+// enforces the same limit with RLS (see supabase-children-migration.sql);
+// the helpers below only keep the UI (and any stale local copies) in line.
+const CHILDREN_MAX_GRADE = 6;
 const TAB_ACCESS = {
   dashboard: ["member", "admin"],
-  scan: ["scanner", "member", "admin"],
-  members: ["member", "admin"],
+  scan: ["scanner", "children", "member", "admin"],
+  members: ["children", "member", "admin"],
   plan: ["member", "admin"],
   groups: ["member", "admin"],
   reports: ["member", "admin"],
-  settings: ["scanner", "member", "admin"],
-  more: ["scanner", "member", "admin"],
+  attendance: ["member", "admin"],
+  settings: ["scanner", "children", "member", "admin"],
+  more: ["scanner", "children", "member", "admin"],
   users: ["admin"],
 };
 function userRole() {
@@ -37,11 +43,22 @@ function userRole() {
 }
 function isAdminUser() { return userRole() === "admin"; }
 function canAccessTab(tab) { return (TAB_ACCESS[tab] || []).includes(userRole()); }
-function defaultTabForRole() { return userRole() === "scanner" ? "scan" : "dashboard"; }
+function defaultTabForRole() {
+  const r = userRole();
+  return r === "scanner" ? "scan" : (r === "children" ? "members" : "dashboard");
+}
+function isChildrenRole() { return userRole() === "children"; }
+// Children's-department users only ever see grades 1..CHILDREN_MAX_GRADE.
+function canSeeMember(m) {
+  if (!isChildrenRole()) return true;
+  return m.grade >= 1 && m.grade <= CHILDREN_MAX_GRADE;
+}
+async function getVisibleMembers() { return (await getAll("members")).filter(canSeeMember); }
 function roleLabel(role, lang) {
   const labels = {
     pending: lang === "am" ? "በመጠባበቅ ላይ" : "Pending",
     scanner: lang === "am" ? "ስካነር" : "Scanner",
+    children: lang === "am" ? "የሕጻናት ክፍል" : "Children's Dept",
     member: lang === "am" ? "አባል" : "Member",
     admin: lang === "am" ? "አስተዳዳሪ" : "Admin",
   };
@@ -98,7 +115,7 @@ async function renderUsers() {
   ]);
   if (rolesRes.error) { status.textContent = (lang === "am" ? "ስህተት: " : "Error: ") + rolesRes.error.message; return; }
   const prof = new Map((profRes.data || []).map((x) => [x.user_id, x]));
-  const order = { pending: 0, scanner: 1, member: 2, admin: 3 };
+  const order = { pending: 0, scanner: 1, children: 2, member: 3, admin: 4 };
   const rows = [...rolesRes.data].sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9));
   const myId = session && session.user ? session.user.id : null;
 

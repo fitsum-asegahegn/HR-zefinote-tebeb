@@ -109,7 +109,7 @@ async function sendNotification(title, options) {
 
 async function buildAndFireNotifications() {
   if (!notifIsSupported() || Notification.permission !== "granted") return false;
-  if (userRole() === "scanner") return false; // scanners don't see call lists/reminders
+  if (userRole() === "scanner" || userRole() === "children") return false; // scanners don't see call lists/reminders
   const lang = getLang();
   const [absentees, confessionDue, planDue] = await Promise.all([
     computeConsecutiveAbsences(), computeConfessionDue(), computePlanReminders(),

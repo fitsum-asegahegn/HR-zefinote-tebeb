@@ -734,12 +734,12 @@ window.toggleLang = function () {
 };
 
 // ---------- Tabs ----------
-const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, groups: renderGroups, settings: renderSettings, reports: renderReports, more: renderMoreMenu, users: renderUsers };
+const RENDERERS = { dashboard: renderDashboard, scan: renderScan, members: renderMembers, plan: renderPlan, groups: renderGroups, settings: renderSettings, reports: renderReports, attendance: renderAttendanceLog, more: renderMoreMenu, users: renderUsers };
 
 // Reports, Groups, and Settings no longer have their own bottom-nav
 // button — they're reached through "More" — so the More tab stays
 // visually active while any of them is open.
-const MORE_SUB_TABS = ["reports", "groups", "settings", "users"];
+const MORE_SUB_TABS = ["reports", "attendance", "groups", "settings", "users"];
 function moreBackBtn() {
   const lang = getLang();
   return `<button class="btn-secondary" onclick="setTab('more')" style="margin-bottom:14px;">${lang === "am" ? "← ተጨማሪ" : "← More"}</button>`;
@@ -748,6 +748,7 @@ function renderMoreMenu() {
   const lang = getLang();
   const items = [
     { tab: "reports", icon: "📊", label: lang === "am" ? "ሪፖርት" : "Reports" },
+    { tab: "attendance", icon: "✏️", label: lang === "am" ? "የመገኘት መዝገብ" : "Attendance Records" },
     { tab: "groups", icon: "👪", label: lang === "am" ? "ቡድኖች" : "Groups" },
     { tab: "users", icon: "🔑", label: lang === "am" ? "ተጠቃሚዎች" : "Users" },
     { tab: "settings", icon: "⚙️", label: lang === "am" ? "ቅንብር" : "Settings" },

@@ -10,7 +10,7 @@
 
 // ---------- Scan ----------
 async function renderScan() {
-  const members = await getAll("members");
+  const members = await getVisibleMembers();
   const progs = PROGRAM_DEFS();
   el("view").innerHTML = `
     <div class="scan-controls">
@@ -107,15 +107,44 @@ window.queueScan = queueScan;
 
 async function queueScanByQrText(raw) {
   const qrId = raw.startsWith("FTW1|") ? raw : "FTW1|" + raw;
-  const members = await getAll("members");
+  const members = await getVisibleMembers();
   const member = members.find((m) => m.qrId === qrId || m.qrId === raw);
   if (!member) return false;
   await queueScan(member.id);
   return true;
 }
 
+// Warns when the chosen program is one that has never (2+ times) been held on
+// this weekday while other programs have — the classic "forgot to switch from
+// Course to Mezmur" mistake. Returns the usual program keys, or null if fine.
+async function usualProgramsIfMismatch(programKey, atDate) {
+  const dow = atDate.getDay(), today = isoDate(atDate);
+  const datesByProg = new Map();
+  for (const a of await getAll("attendance")) {
+    if (a.sessionDate === today) continue; // today's own scans may be the mistake
+    if (new Date(a.sessionDate + "T00:00:00").getDay() !== dow) continue;
+    if (!datesByProg.has(a.programKey)) datesByProg.set(a.programKey, new Set());
+    datesByProg.get(a.programKey).add(a.sessionDate);
+  }
+  const usual = [...datesByProg.entries()].filter(([, set]) => set.size >= 2).map(([k]) => k);
+  return usual.length && !usual.includes(programKey) ? usual : null;
+}
+
 async function confirmBatch() {
   if (!scanState.batch.length) return;
+  const am = getLang() === "am";
+  const usual = await usualProgramsIfMismatch(scanState.program, scanState.batch[0].scannedAt);
+  if (usual) {
+    const progs = PROGRAM_DEFS();
+    const nameOf = (k) => (progs.find((p) => p.key === k) || { name: k }).name;
+    const days = am ? ["እሁድ", "ሰኞ", "ማክሰኞ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅዳሜ"] : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const day = days[scanState.batch[0].scannedAt.getDay()];
+    const ok = await showConfirm(am
+      ? `${day} ብዙውን ጊዜ የሚካሄደው «${usual.map(nameOf).join("፣ ")}» ነው፣ አሁን ግን «${nameOf(scanState.program)}» እየመዘገቡ ነው። እንዲህ ይመዝግቡ?`
+      : `${day} is normally ${usual.map(nameOf).join(", ")}, but you're recording ${nameOf(scanState.program)}. Record it anyway?`,
+      { okLabel: am ? "አዎ መዝግብ" : "Record anyway", cancelLabel: am ? "ፕሮግራም ልቀይር" : "Change program" });
+    if (!ok) return; // batch is kept so the program can be changed first
+  }
   const items = [...scanState.batch];
   scanState.batch = [];
   renderBatchList();
@@ -232,7 +261,7 @@ async function handleQrHit(qrId) {
     }
   }
 
-  const members = await getAll("members");
+  const members = await getVisibleMembers();
   const member = members.find((m) => m.qrId === qrId);
   if (!member) return;
   await queueScan(member.id);

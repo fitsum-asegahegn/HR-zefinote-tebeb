@@ -103,7 +103,7 @@ async function renderSettings() {
       <p class="muted" id="syncStatus">-</p>
       <div class="toolbar">
         <button id="syncBtn" class="btn-secondary">${t("settings.syncNow")}</button>
-        ${userRole() !== "scanner" ? `
+        ${!["scanner", "children"].includes(userRole()) ? `
         <button id="exportJsonBtn" class="btn-secondary">${t("settings.exportJson")}</button>
         <label class="btn-secondary file-btn">${t("settings.importJson")}<input type="file" id="importJsonInput" accept=".json" style="display:none;"/></label>
         <button id="exportExcelBtn" class="btn-secondary">${t("settings.exportExcel")}</button>` : ""}

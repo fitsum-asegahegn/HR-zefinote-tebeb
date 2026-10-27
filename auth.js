@@ -151,9 +151,11 @@ async function mirrorAuthForSW(session) {
 
 // ---------- Role-based access control (client-side reflection of DB role) ----------
 // Roles: pending (just signed up, no access) < scanner (attendance only,
-// names visible) < member (day-to-day HR work) < admin. Real enforcement is
-// the RLS policies in supabase-schema.sql; this only drives the UI.
-const ROLE_NAMES = ["pending", "scanner", "member", "admin"];
+// names visible) < children (children's department: scan + add/see members of
+// grades 1-6 only) < member (day-to-day HR work) < admin. Real enforcement is
+// the RLS policies in supabase-schema.sql + supabase-children-migration.sql;
+// this only drives the UI.
+const ROLE_NAMES = ["pending", "scanner", "children", "member", "admin"];
 window.currentUserRole = "pending";
 async function fetchUserRole(session) {
   if (!sbClient || !session) { window.currentUserRole = "pending"; return; }
@@ -200,6 +202,7 @@ window.saveDisplayName = saveDisplayName;
 function mapMemberToRemote(m) {
   return {
     id: m.id, full_name: m.fullName, phone: m.phone || null, category: m.category || null, grade: m.grade || null,
+    section: m.section || null,
     qr_id: m.qrId, last_confession_date: m.lastConfessionDate, join_date: m.joinDate, active: m.active !== false,
     call_log: m.callLog || null, call_history: m.callHistory || [],
     christian_name: m.christianName || null, gender: m.gender || null, age: m.age ?? null,
@@ -215,6 +218,7 @@ function mapMemberToRemote(m) {
 function mapRemoteToMember(r) {
   return {
     id: r.id, fullName: r.full_name, phone: r.phone || "", category: r.category || "", grade: r.grade || null,
+    section: r.section || "",
     qrId: r.qr_id, lastConfessionDate: r.last_confession_date, joinDate: r.join_date,
     active: r.active !== false, callLog: r.call_log || null, callHistory: r.call_history || [], synced: true,
     christianName: r.christian_name || "", gender: r.gender || "", age: r.age ?? null,
@@ -322,6 +326,9 @@ async function syncNow() {
   // scanners only record attendance (and read member names); the DB
   // rejects their writes to everything else, so don't even try.
   const canWrite = role === "member" || role === "admin";
+  // children's department: may also add/edit members, but only grades 1-6
+  // (the DB enforces that; see supabase-children-migration.sql)
+  const canWriteMembers = canWrite || role === "children";
 
   setStatus(t("sync.working"));
   try {
@@ -337,7 +344,8 @@ async function syncNow() {
           .update({ deleted_at: tomb.deletedAt }).eq("id", tomb.recordId);
         if (!error) { tomb.synced = true; await put("tombstones", tomb); }
       }
-
+    }
+    if (canWriteMembers) {
       // push members
       const members = await getAll("members");
       const pendingMembers = members.filter((m) => !m.synced);
@@ -345,6 +353,8 @@ async function syncNow() {
         const { error } = await sbClient.from("members").upsert(pendingMembers.map(mapMemberToRemote));
         if (!error) for (const m of pendingMembers) { m.synced = true; await put("members", m); }
       }
+    }
+    if (canWrite) {
       // push permissions (after members, since each references a member)
       const excuses = await getAll("excuses");
       const pendingExcuses = excuses.filter((x) => !x.synced);
@@ -377,10 +387,23 @@ async function syncNow() {
     // push attendance (all roles)
     const attendance = await getAll("attendance");
     const pendingAtt = attendance.filter((a) => !a.synced);
-    if (pendingAtt.length) {
+    // Records corrected after scanning (Attendance Records screen) keep their
+    // id, so they go up as an UPDATE by id — an upsert on member+date+program
+    // would hit the primary key when the program was changed.
+    const toUpsert = [];
+    for (const a of pendingAtt) {
+      if (!a.pendingEdit) { toUpsert.push(a); continue; }
+      const { data, error } = await sbClient.from("attendance")
+        .update({ program_key: a.programKey, status: a.status })
+        .eq("id", a.id).select("id");
+      if (error) continue; // stays unsynced, retried on the next sync
+      if (data && data.length) { a.synced = true; a.pendingEdit = false; await put("attendance", a); }
+      else toUpsert.push(a); // never reached the server yet: send it as a new row
+    }
+    if (toUpsert.length) {
       const { error } = await sbClient.from("attendance")
-        .upsert(pendingAtt.map((a) => mapAttendanceToRemote(a, session.user.id)), { onConflict: "member_id,session_date,program_key" });
-      if (!error) for (const a of pendingAtt) { a.synced = true; await put("attendance", a); }
+        .upsert(toUpsert.map((a) => mapAttendanceToRemote(a, session.user.id)), { onConflict: "member_id,session_date,program_key" });
+      if (!error) for (const a of toUpsert) { a.synced = true; a.pendingEdit = false; await put("attendance", a); }
     }
     if (canWrite) {
       // push families
@@ -407,7 +430,12 @@ async function syncNow() {
 
     // pull remote changes (members + attendance for every role)
     const settings = await getSettings();
-    const since = settings.lastPulledAt || "1970-01-01T00:00:00Z";
+    // What a role is allowed to read differs (children see grades 1-6 only), so
+    // when this user's role changed since the last pull, start from the
+    // beginning once — otherwise rows that became visible but are older than
+    // the watermark would never arrive. Re-pulling is harmless (merged by id).
+    const roleChanged = settings.lastPulledRole && settings.lastPulledRole !== role;
+    const since = roleChanged ? "1970-01-01T00:00:00Z" : (settings.lastPulledAt || "1970-01-01T00:00:00Z");
     const { data: remoteMembers } = await sbClient.from("members").select("*").gt("updated_at", since);
     if (remoteMembers) {
       for (const rm of remoteMembers) {
@@ -492,6 +520,7 @@ async function syncNow() {
       }
     }
     await setSetting("lastPulledAt", pullStartedAt);
+    await setSetting("lastPulledRole", role);
     setStatus(t("sync.done"));
   } catch (err) {
     setStatus(t("sync.error"));
