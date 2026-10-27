@@ -156,6 +156,20 @@
   <script src="./i18n.js"></script>
   <script src="./ethiopian-calendar.js"></script>
   <script src="./auth.js"></script>
+  <!-- Feature modules: plain scripts (no build step). All must load BEFORE app.js,
+       which builds RENDERERS at load time from functions defined in these files. -->
+  <script src="./roles.js"></script>
+  <script src="./settings.js"></script>
+  <script src="./device.js"></script>
+  <script src="./dashboard.js"></script>
+  <script src="./scan.js"></script>
+  <script src="./members.js"></script>
+  <script src="./idcards.js"></script>
+  <script src="./plan.js"></script>
+  <script src="./reports.js"></script>
+  <script src="./groups.js"></script>
+  <script src="./discipline.js"></script>
+  <script src="./roster.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

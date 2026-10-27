@@ -1,9 +1,21 @@
-const CACHE = "finote-attendance-v61";
+const CACHE = "finote-attendance-v70";
 
 const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
+  "./roster.js",
+  "./discipline.js",
+  "./groups.js",
+  "./reports.js",
+  "./idcards.js",
+  "./plan.js",
+  "./members.js",
+  "./dashboard.js",
+  "./scan.js",
+  "./device.js",
+  "./settings.js",
+  "./roles.js",
   "./i18n.js",
   "./auth.js",
   "./config.js",
