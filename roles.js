@@ -53,6 +53,9 @@ function defaultTabForRole() {
   const r = userRole();
   return r === "scanner" ? "scan" : "dashboard";
 }
+// Who may record attendance for a PAST date (forgot the phone, used paper):
+// members and admins only. Scanners and the children's department can't.
+function canBackdate() { const r = userRole(); return r === "member" || r === "admin"; }
 function isChildrenRole() { return userRole() === "children"; }
 // Children's-department users only ever see grades 1..CHILDREN_MAX_GRADE.
 function canSeeMember(m) {

@@ -12,6 +12,7 @@
 async function renderScan() {
   const members = await getVisibleMembers();
   const progs = visiblePrograms();
+  const am = getLang() === "am";
   el("view").innerHTML = `
     <div class="scan-controls">
       <label>${t("scan.programLabel")}</label>
@@ -25,6 +26,23 @@ async function renderScan() {
     </div>
     <p class="muted" id="scanStatus" style="display:none;">● ${t("scan.readyStatus")}</p>
     <canvas id="canvas" style="display:none;"></canvas>
+
+    ${canBackdate() ? `
+    <details id="backdateBox" style="margin-bottom:10px;">
+      <summary class="muted" style="cursor:pointer;">📅 ${am ? "ስልክ ረስተው በወረቀት ተመዝግበው ነበር? ለሌላ ቀን መዝግብ" : "Forgot the phone / used paper? Record for another date"}</summary>
+      <div class="list-row" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:8px;">
+        <label class="muted">${am ? "የመገኘቱ ቀን" : "Attendance date"}</label>
+        <input id="bd_date" type="date" class="text-input" style="margin-bottom:0;" max="${todayISO()}">
+        <p class="muted" id="bd_eth" style="margin:0;"></p>
+        <label class="muted">${am ? "ሁኔታ (በዝርዝሩ ላሉት ሁሉ)" : "Status (for everyone in the list)"}</label>
+        <select id="bd_status" class="text-input" style="margin-bottom:0;">
+          <option value="on-time">${t("scan.onTime")}</option>
+          <option value="late">${t("scan.late")}</option>
+        </select>
+        <button id="bd_reset" class="btn-small" style="align-self:flex-start;">${am ? "ወደ ዛሬ መልስ" : "Back to today"}</button>
+      </div>
+    </details>` : ""}
+    <p id="backdateBanner" style="display:none;background:var(--amber);color:#1a1410;font-weight:700;padding:8px 12px;border-radius:10px;"></p>
 
     <h3 class="section-title">${t("batch.title")}</h3>
     <div class="toolbar">
@@ -51,6 +69,22 @@ async function renderScan() {
   el("torchToggle").onclick = toggleTorch;
   el("confirmBatchBtn").onclick = confirmBatch;
   el("clearBatchBtn").onclick = () => { scanState.batch = []; renderBatchList(); };
+
+  // back-dating is never remembered between visits to this tab
+  scanState.backdate = { date: "", status: "on-time" };
+  if (el("bd_date")) {
+    el("bd_date").onchange = async (e) => {
+      const v = e.target.value;
+      if (v && v > todayISO()) {
+        await showAlert(am ? "የወደፊት ቀን መምረጥ አይቻልም" : "You can't pick a future date.");
+        e.target.value = ""; scanState.backdate.date = "";
+      } else scanState.backdate.date = v;
+      updateBackdateUI();
+    };
+    el("bd_status").onchange = (e) => { scanState.backdate.status = e.target.value; updateBackdateUI(); };
+    el("bd_reset").onclick = () => resetBackdate();
+  }
+  updateBackdateUI();
 
   // Debounced search
   let searchTimeout;
@@ -133,21 +167,47 @@ async function usualProgramsIfMismatch(programKey, atDate) {
 async function confirmBatch() {
   if (!scanState.batch.length) return;
   const am = getLang() === "am";
-  const usual = await usualProgramsIfMismatch(scanState.program, scanState.batch[0].scannedAt);
+  const bd = canBackdate() && scanState.backdate && scanState.backdate.date ? scanState.backdate : null;
+  const refDate = bd ? new Date(bd.date + "T12:00:00") : scanState.batch[0].scannedAt;
+  const usual = await usualProgramsIfMismatch(scanState.program, refDate);
   if (usual) {
     const progs = PROGRAM_DEFS();
     const nameOf = (k) => (progs.find((p) => p.key === k) || { name: k }).name;
     const days = am ? ["እሁድ", "ሰኞ", "ማክሰኞ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅዳሜ"] : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const day = days[scanState.batch[0].scannedAt.getDay()];
+    const day = days[refDate.getDay()];
     const ok = await showConfirm(am
       ? `${day} ብዙውን ጊዜ የሚካሄደው «${usual.map(nameOf).join("፣ ")}» ነው፣ አሁን ግን «${nameOf(scanState.program)}» እየመዘገቡ ነው። እንዲህ ይመዝግቡ?`
       : `${day} is normally ${usual.map(nameOf).join(", ")}, but you're recording ${nameOf(scanState.program)}. Record it anyway?`,
       { okLabel: am ? "አዎ መዝግብ" : "Record anyway", cancelLabel: am ? "ፕሮግራም ልቀይር" : "Change program" });
     if (!ok) return; // batch is kept so the program can be changed first
   }
+  if (bd) {
+    const progName = (PROGRAM_DEFS().find((p) => p.key === scanState.program) || { name: scanState.program }).name;
+    const stLabel = bd.status === "late" ? t("scan.late") : t("scan.onTime");
+    const ok = await showConfirm(am
+      ? `${scanState.batch.length} ሰዎች ለ ${bd.date} (${ethLabel(bd.date)}) ይመዘገባሉ።\nፕሮግራም: ${progName}\nሁኔታ: ${stLabel}\nዛሬ አይደለም — ይቀጥል?`
+      : `Record ${scanState.batch.length} people for ${bd.date} (${ethLabel(bd.date)})?\nProgram: ${progName}\nStatus: ${stLabel}\nThis is NOT today.`,
+      { okLabel: am ? "አዎ መዝግብ" : "Yes, record", cancelLabel: am ? "ይቅር" : "Cancel" });
+    if (!ok) return;
+  }
   const items = [...scanState.batch];
   scanState.batch = [];
   renderBatchList();
+  if (bd) {
+    const r = await recordBackdatedBatch(items, scanState.program, bd);
+    resetBackdate();
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = t("batch.confirmedToast", { n: r.added });
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+    if (r.skipped.length) {
+      await showAlert(am
+        ? `${r.skipped.length} ሰዎች በዚያ ቀን ቀድሞ ተመዝግበው ስለነበር አልተለወጡም:\n${r.skipped.slice(0, 15).join(", ")}`
+        : `${r.skipped.length} already had attendance on that day and were left unchanged:\n${r.skipped.slice(0, 15).join(", ")}`);
+    }
+    return;
+  }
   for (const item of items) {
     const { status } = await recordAttendance(item.memberId, scanState.program, item.scannedAt);
     pushScanFeed({ fullName: item.fullName }, status);
@@ -265,4 +325,60 @@ async function handleQrHit(qrId) {
   const member = members.find((m) => m.qrId === qrId);
   if (!member) return;
   await queueScan(member.id);
+}
+
+
+// ---------- Recording for a past date (forgot the phone / paper attendance) ----------
+// Members/admins pick the real date (and on-time/late for the whole list); the
+// records are stamped at that program's start time on that day so everything
+// downstream (reports, streaks, Attendance Records) sees them as normal rows.
+// People who already have a record for that program + day are left untouched,
+// and the old call flag is NOT cleared (this isn't "today").
+function updateBackdateUI() {
+  const am = getLang() === "am";
+  const bd = scanState.backdate;
+  const banner = el("backdateBanner");
+  if (el("bd_eth")) el("bd_eth").textContent = bd && bd.date ? ethLabel(bd.date) : "";
+  if (!banner) return;
+  if (!bd || !bd.date) { banner.style.display = "none"; return; }
+  banner.style.display = "block";
+  banner.textContent = `📅 ${am ? "ለዚህ ቀን እየመዘገቡ ነው" : "Recording for"}: ${bd.date} · ${ethLabel(bd.date)} · ${bd.status === "late" ? t("scan.late") : t("scan.onTime")}`;
+}
+
+function resetBackdate() {
+  scanState.backdate = { date: "", status: "on-time" };
+  if (el("bd_date")) el("bd_date").value = "";
+  if (el("bd_status")) el("bd_status").value = "on-time";
+  updateBackdateUI();
+}
+
+async function recordBackdatedBatch(items, programKey, bd) {
+  const cfg = await getProgramConfig(programKey);
+  const [h, m] = String(cfg.startTime).split(":").map(Number);
+  const [y, mo, d] = bd.date.split("-").map(Number);
+  const status = bd.status === "late" ? "late" : "on-time";
+  let at = new Date(y, mo - 1, d, h || 0, m || 0, 0, 0);
+  if (status === "late") at = new Date(at.getTime() + (Number(cfg.graceMinutes) + 1) * 60000);
+  const settings = await getSettings();
+  const by = await resolveCallerName();
+  const have = new Set((await getAll("attendance"))
+    .filter((a) => a.sessionDate === bd.date && a.programKey === programKey).map((a) => a.memberId));
+  let added = 0;
+  const skipped = [];
+  for (const item of items) {
+    if (have.has(item.memberId)) { skipped.push(item.fullName); continue; }
+    await put("attendance", {
+      id: uid(), memberId: item.memberId, programKey, sessionDate: bd.date,
+      timestamp: at.toISOString(), status, deviceId: settings.deviceId, synced: false,
+      backdated: true, backdatedBy: by,
+    });
+    have.add(item.memberId);
+    added++;
+    pushScanFeed({ fullName: item.fullName }, status);
+  }
+  if (added) {
+    if (!navigator.onLine) requestBackgroundSync();
+    syncNow();
+  }
+  return { added, skipped };
 }
