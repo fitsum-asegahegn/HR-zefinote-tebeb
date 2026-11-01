@@ -346,7 +346,7 @@ function groupByOccupation(members) {
 async function computeConsecutiveAbsences() {
   // university students are mostly away, so they aren't flagged for calls
   // (see More -> Groups -> University Students)
-  const members = (await getAll("members")).filter((m) => m.active !== false && !m.isUniversityStudent);
+  const members = (await getAll("members")).filter(canSeeMember).filter((m) => m.active !== false && !m.isUniversityStudent);
   const attendance = await getAll("attendance");
   const sessionDates = [...new Set(attendance.map((a) => a.sessionDate))].sort().reverse();
   const excuseIdx = await loadExcuseIndex();
@@ -368,7 +368,7 @@ async function computeConsecutiveAbsences() {
 }
 
 async function computeProgramSpecificAbsences(programKey) {
-  const members = (await getAll("members")).filter((m) => m.active !== false && !m.isUniversityStudent);
+  const members = (await getAll("members")).filter(canSeeMember).filter((m) => m.active !== false && !m.isUniversityStudent);
   const attendance = await getAll("attendance");
   const progAttendance = attendance.filter(a => a.programKey === programKey);
   const sessionDates = [...new Set(progAttendance.map((a) => a.sessionDate))].sort().reverse();

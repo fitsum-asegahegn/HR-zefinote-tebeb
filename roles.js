@@ -24,11 +24,17 @@ const VALID_ROLES = ["pending", "scanner", "children", "member", "admin"];
 // enforces the same limit with RLS (see supabase-children-migration.sql);
 // the helpers below only keep the UI (and any stale local copies) in line.
 const CHILDREN_MAX_GRADE = 6;
+// ...and they only work with these three programs (Scan + Dashboard filters).
+const CHILDREN_PROGRAMS = ["timhert", "mezmur", "tselot"];
+function visiblePrograms() {
+  const all = PROGRAM_DEFS();
+  return userRole() === "children" ? all.filter((p) => CHILDREN_PROGRAMS.includes(p.key)) : all;
+}
 const TAB_ACCESS = {
-  dashboard: ["member", "admin"],
+  dashboard: ["children", "member", "admin"],
   scan: ["scanner", "children", "member", "admin"],
   members: ["children", "member", "admin"],
-  plan: ["member", "admin"],
+  plan: ["children", "member", "admin"],
   groups: ["member", "admin"],
   reports: ["member", "admin"],
   attendance: ["member", "admin"],
@@ -45,7 +51,7 @@ function isAdminUser() { return userRole() === "admin"; }
 function canAccessTab(tab) { return (TAB_ACCESS[tab] || []).includes(userRole()); }
 function defaultTabForRole() {
   const r = userRole();
-  return r === "scanner" ? "scan" : (r === "children" ? "members" : "dashboard");
+  return r === "scanner" ? "scan" : "dashboard";
 }
 function isChildrenRole() { return userRole() === "children"; }
 // Children's-department users only ever see grades 1..CHILDREN_MAX_GRADE.

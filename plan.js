@@ -36,28 +36,84 @@ const DEFAULT_PLAN_INTERNAL = [
   { no: 5, subUnit: "የክፍል ውስጥ ግንኙነት", title: "የክፍል ውስጥ ደስታ/ሐዘን መጠያየቅ", timing: "እንደአጋጣሚው", metricTarget: "እንደአጋጣሚው", executor: "የክፍል ውስጥ ግንኙነት ንዑስ ክፍል", recurrenceDays: 0 },
 ];
 
+
+// Children's department plan (ሕጻናት ክፍል ዕቅድ). Seeded on every device but only
+// shown to the children's-department role (see planVisibleToRole). `indicator`
+// is the unit (በፐርሰንት = percent / በቁጥር = count) and `metricTarget` the plan.
+// fixedCadence: schedule from recurrenceDays, ignoring the month text.
+const DEFAULT_PLAN_CHILDREN = [
+  { no: 1, subUnit: "", title: "መረጃ ማደራጀት", details: "ፎርም ማዘጋጀት; እንዲሞሉ ማድረግ", indicator: "በፐርሰንት", metricTarget: "80%", timing: "ከመስከረም-ህዳር", executor: "ህፃናት ክፍል ከ የሰው ሀብት አስተዳደር ክፍል ጋር በመተባበር", budget: "2000", recurrenceDays: 365 },
+  { no: 2, subUnit: "", title: "መንፈሳዊ ፊልም እና መንፈሳዊ ጨዋታ ማሳየት", details: "ታሪኮችን መፈለግ; የታሪክ አባት ማዘጋጀት; መንፈሳዊ ፊልም ማሳየት; መንፈሳዊ ጨዋታ ማዘጋጀት", indicator: "በፐርሰንት", metricTarget: "80%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል", budget: "-", recurrenceDays: 365 },
+  { no: 3, subUnit: "", title: "የቁርባን መርሀግብር ማዘጋጀት", details: "ጊዜ መመደብ; ቦታ ማዘጋጀት; ትምህርት መስጠት; ከንስሐ አባት ጋር ማገናኘት", indicator: "በቁጥር", metricTarget: "4", timing: "ጥቅምት 22, ጥር 30, መጋቢት 29, ግንቦት 1", executor: "ህፃናት ክፍል", budget: "-", recurrenceDays: 91 },
+  { no: 4, subUnit: "", title: "የጠፉ አባላትን መፈለግ", details: "አቴንዳስ መከታተል; ደውሎ ምክንያት መጠየቅ; ደብዳቤ መላክ; ቤት ድረስ መሄድ", indicator: "በፐርሰንት", metricTarget: "70%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል", budget: "500", recurrenceDays: 365 },
+  { no: 5, subUnit: "", title: "ስርዓተ ትምህርት እና የአብነት ትምህርት በተገቢ ሁኔታ መስጠቱን መቆጣጠር", details: "ትምህርት መሰጠቱን መቆጣጠር; ስልጠና መሰጠቱን መቆጣጠር; መምህራንን መገምገም; የተማሩትን ትምህርት ተግባራዊ ልምምድ በመስጠት መከታተል; መምህራንን ማስመደብ; ጊዜ ማመቻቸት", indicator: "በፐርሰንት", metricTarget: "90%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል ከ ትምህርት እና ስልጠና ክፍል ጋር በመተባበር", budget: "-", recurrenceDays: 365 },
+  { no: 6, subUnit: "", title: "መዝሙር እና ኪነጥበብ ስራዎችን በተገቢ ሁኔታ መስጠቱን መቆጣጠር", details: "የአመቱን መዝሙራት በወቅታቸው መጠናቱን መቆጣጠር; የንግስ ወረቦች መጠናቱን መቆጣጠር; የኪነጥበብ ስራዎች በወቅታቸው እየተሰሩ መሆኑን መቆጣጠር", indicator: "በፐርሰንት", metricTarget: "90%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል ከ ዜማ እና ስነጥበብ ክፍል ጋር በመተባበር", budget: "-", recurrenceDays: 365 },
+  { no: 7, subUnit: "", title: "አባላትን በ ቤተሰብ ማደራጀት", details: "አባት እና እናት መመደብ; በወር አንዴ እንዲሰበሰቡ ማድረግ", indicator: "በፐርሰንት", metricTarget: "80%", timing: "ከህዳር-የካቲት", executor: "ህፃናት ክፍል ከሰው ሀብት አስተዳደር ክፍል ጋር በመተባበር", budget: "-", recurrenceDays: 365 },
+  { no: 8, subUnit: "", title: "መንፈሳዊ ቦታዎችን እንዲጎበኙ ሁኔታዎችን ማመቻቸት", details: "ከሚመለከተው ክፍል ጋር በመሆን መንፈሳዊ ቦታዎችን እንዲጎበኙ ማድረግ", indicator: "በቁጥር", metricTarget: "2", timing: "የካቲት 21, ሐምሌ 25", executor: "ህፃናት ክፍል ከ መረጃ እና የውስጥ ግንኙነት ክፍል ጋር በመተባበር", budget: "1000", recurrenceDays: 182 },
+  { no: 9, subUnit: "", title: "ከወላጆች ጋር ትስስር መፍጠር", details: "ኮሚውኒኬሽን ቡክ እንዲዘጋጅ ማድረግ; በየ 3 ወሩ የውይይት መርሀግብር ማዘጋጀት; የ ስነምግባር እና የዕለት ተዕለት ለውጣቸውን መከታተል", indicator: "በፐርሰንት", metricTarget: "80%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል ከመርሀግብር እና ጉባዔያት ክፍል ጋር በመተባበር", budget: "1500", recurrenceDays: 365 },
+  { no: 10, subUnit: "", title: "የተለያዩ መርሀግብሮችን ማዘጋጀት", details: "የውይይት መድረኮችን ማዘጋጀት; የልደት፣የሰንበት ት/ቤቱን የልደት መርሀግብር ማዘጋጀት; ለመርሀግብሩ ሚሆኑ ስራዎችን የሚመለከተው ክፍል ማዘጋጀቱን መቆጣጠር; ንግስ ወይም መርሀግብር ካለፈ በኋላ ግምገማ በማድረግ የመፍትሄ ሀሳቦችን ማስቀመጥ", indicator: "በቁጥር", metricTarget: "5", timing: "መስከረም 23, ታህሳስ 25, ጥር 9, ነሀሴ 23, ነሀሴ 29", executor: "ህፃናት ክፍል ከ መርሀግብርና ጉባዔያት እና ከዜማናስነጥበብ ክፍል ጋር በመተባበር", budget: "3000", recurrenceDays: 91 },
+  { no: 11, subUnit: "", title: "ወርሀዊ መዋጮ መሰብሰብ", details: "ከህፃናት መሰብሰብ; ከአባላት መሰብሰብ; የተሰበሰበውን ብር ለሚመለከተው ክፍል ማስረከብ", indicator: "በቁጥር", metricTarget: "12", timing: "12 ጊዜ", executor: "ህፃናት ክፍል ከ ሂሳብና ንብረት ክፍል ጋር በመተባበር", budget: "-", recurrenceDays: 30, fixedCadence: true },
+  { no: 12, subUnit: "", title: "ስብሰባ ማድረግ", details: "ከአባላት ጋር በመነጋገር በወሩ መጨረሻ መሰብሰብ", indicator: "በፐርሰንት", metricTarget: "80%", timing: "ከመስከረም-ነሀሴ", executor: "ህፃናት ክፍል", budget: "-", recurrenceDays: 30, fixedCadence: true },
+  { no: 13, subUnit: "", title: "ልምድ ልውውጥ ማድረግ", details: "ቦታ መምረጥ; ደብዳቤ መላክ", indicator: "በቁጥር", metricTarget: "1", timing: "የካቲት 28", executor: "ህፃናት ክፍል", budget: "200", recurrenceDays: 365 },
+  { no: 14, subUnit: "", title: "የ 2020 ዕቅድ ማቀድ", details: "የ2019 እቅድን መሰረት በማድረግ ማቀድ; ክፍተቶችን ለመድፈን መፍትሄ በመፈለግ ማቀድ", indicator: "በቁጥር", metricTarget: "1", timing: "ነሀሴ", executor: "ህፃናት ክፍል", budget: "-", recurrenceDays: 365 },
+];
+
+// ---------- Due-date calculation ----------
+// On top of the month-level scheduling in ethiopian-calendar.js this understands
+//   "ጥቅምት 22, ጥር 30"  -> the exact days (Ethiopian calendar)
+//   "ከመስከረም-ነሀሴ"     -> a range starting with ከ: due at the END of the last month
+// and treats the spelling ነሀሴ like ነሐሴ.
+function normalizeEthText(s) { return String(s || "").replace(/ነሀሴ/g, "ነሐሴ"); }
+function planNextDate(timing, fromDate) {
+  const text = normalizeEthText(timing);
+  const names = Object.keys(ETH_MONTH_MAP).sort((a, b) => b.length - a.length).join("|");
+  const fromMid = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+  const fromEthYear = gregorianToEthiopian(fromDate).year;
+  const nextAfter = (list) => {
+    const c = [];
+    for (const y of [fromEthYear, fromEthYear + 1]) for (const [m, d] of list) c.push(ethiopianToGregorian(y, m, d));
+    c.sort((a, b) => a - b);
+    const hit = c.find((x) => x > fromMid);
+    return hit ? isoDate(hit) : null;
+  };
+  const pairs = [...text.matchAll(new RegExp("(" + names + ")\\s*(\\d{1,2})", "g"))]
+    .map((m) => [ETH_MONTH_MAP[m[1]], parseInt(m[2], 10)])
+    .filter(([mo, d]) => d >= 1 && d <= (mo === 13 ? 6 : 30));
+  if (pairs.length) return nextAfter(pairs);
+  const range = new RegExp("ከ\\s*(" + names + ")\\s*[-\u2013\u2014]\\s*(" + names + ")").exec(text);
+  if (range) { const mo = ETH_MONTH_MAP[range[2]]; return nextAfter([[mo, mo === 13 ? 5 : 30]]); }
+  return computeEthAwareNextDate(text, fromDate);
+}
+// Only items of the current role's plan are shown/used: the children's
+// department sees its own plan; everyone else sees the HR plan.
+function planVisibleToRole(p) {
+  return isChildrenRole() ? p.category === "children" : p.category !== "children";
+}
+
 async function ensurePlanItems() {
   const existing = await getAll("planItems");
   const existingKeys = new Set(existing.map((e) => e.category + "|" + e.title));
   const today = new Date();
   const seedRow = async (row, category) => {
     if (existingKeys.has(category + "|" + row.title)) return; // already present — don't touch its progress
-    const ethNext = computeEthAwareNextDate(row.timing, today);
+    // "on or after today" (so an event dated today still shows up): look from yesterday
+    const ethNext = row.fixedCadence ? null : planNextDate(row.timing, addDays(today, -1));
     const fallbackNext = row.recurrenceDays > 0 ? isoDate(addDays(today, 14)) : null;
     await put("planItems", {
       id: uid(), no: row.no, category, subUnit: row.subUnit, title: row.title,
       details: row.details || "", outcome: row.outcome || "", indicator: row.indicator || "",
       metricTarget: row.metricTarget || "", timing: row.timing, executor: row.executor,
-      budget: row.budget || "-", recurrenceDays: row.recurrenceDays, autoMetric: row.autoMetric || null,
+      budget: row.budget || "-", recurrenceDays: row.recurrenceDays, fixedCadence: !!row.fixedCadence, autoMetric: row.autoMetric || null,
       nextDate: ethNext || fallbackNext, lastDone: null, doneLog: [],
     });
   };
   for (const row of DEFAULT_PLAN_MAIN) await seedRow(row, "main");
   for (const row of DEFAULT_PLAN_INTERNAL) await seedRow(row, "internal");
+  for (const row of DEFAULT_PLAN_CHILDREN) await seedRow(row, "children");
 }
 
 async function computePlanReminders() {
-  const items = await getAll("planItems");
+  const items = (await getAll("planItems")).filter(planVisibleToRole);
   const today = todayISO();
   return items.filter((e) => e.nextDate).map((e) => ({ ...e, overdue: e.nextDate <= today })).sort((a, b) => (a.nextDate || "9999").localeCompare(b.nextDate || "9999"));
 }
@@ -69,7 +125,10 @@ async function markPlanItemDone(id, note) {
   e.lastDone = today;
   e.doneLog = e.doneLog || [];
   e.doneLog.push({ date: today, note: note || "" });
-  const ethNext = computeEthAwareNextDate(e.timing, new Date());
+  // Done ahead of time? Then the next due date is the one AFTER the current
+  // due date, not the same one again.
+  const base = e.nextDate && e.nextDate > today ? new Date(e.nextDate + "T00:00:00") : new Date();
+  const ethNext = e.fixedCadence ? null : planNextDate(e.timing, base);
   if (ethNext) e.nextDate = ethNext;
   else if (e.recurrenceDays > 0) e.nextDate = isoDate(addDays(new Date(), e.recurrenceDays));
   await put("planItems", e);
@@ -77,13 +136,15 @@ async function markPlanItemDone(id, note) {
 
 // ---------- Plan ----------
 async function renderPlan() {
-  const planItems = await getAll("planItems");
-  const categories = [
-    { key: "main", label: t("plan.mainCategory") },
-    { key: "internal", label: t("plan.internalCategory") },
-  ];
-  const isAdmin = isAdminUser();
+  const planItems = (await getAll("planItems")).filter(planVisibleToRole);
   const lang = getLang();
+  const categories = isChildrenRole()
+    ? [{ key: "children", label: lang === "am" ? "የሕጻናት ክፍል ዕቅድ" : "Children's department plan" }]
+    : [
+        { key: "main", label: t("plan.mainCategory") },
+        { key: "internal", label: t("plan.internalCategory") },
+      ];
+  const isAdmin = isAdminUser();
 
   el("view").innerHTML = `
     <div class="toolbar">
@@ -103,7 +164,10 @@ async function renderPlan() {
           <div class="list-row">
             <div style="flex:1;">
               <b>${p.no}. ${p.title}</b><br>
-              <span class="muted">${p.subUnit} · ${p.timing}</span><br>
+              <span class="muted">${[p.subUnit, p.timing].filter(Boolean).join(" · ")}</span><br>
+              ${p.indicator ? `<span class="muted">${lang === "am" ? "ዒላማ" : "Target"}: ${p.indicator} ${p.metricTarget || ""}${p.budget && p.budget !== "-" ? " · " + (lang === "am" ? "በጀት" : "Budget") + ": " + p.budget : ""}</span><br>` : ""}
+              ${p.details ? `<span class="muted">${p.details}</span><br>` : ""}
+              ${p.category === "children" && p.executor ? `<span class="muted">${p.executor}</span><br>` : ""}
               ${p.nextDate ? `<span class="muted">${t("plan.next")}: ${ethLabel(p.nextDate)} (${p.nextDate})</span>` : ""}
             </div>
             <div class="row-actions">
@@ -158,8 +222,10 @@ window.openPlanItemModal = async function (id) {
       <input id="pi_title" class="text-input" value="${item.title || ""}">
       <label>${lang === "am" ? "አስፈጻሚ" : "Executor"}</label>
       <input id="pi_executor" class="text-input" value="${item.executor || ""}">
-      <label>${lang === "am" ? "ዒላማ / ጊዜ" : "Target / Timing"}</label>
-      <input id="pi_metricTarget" class="text-input" value="${item.metricTarget || item.timing || ""}">
+      <label>${lang === "am" ? "ዒላማ" : "Target"}</label>
+      <input id="pi_metricTarget" class="text-input" value="${item.metricTarget || ""}">
+      <label>${lang === "am" ? "የጊዜ ገደብ" : "Timing"}</label>
+      <input id="pi_timing" class="text-input" value="${item.timing || ""}">
       <label>${lang === "am" ? "የድግግሞሽ ቀናት (0 = በእጅ የሚከታተል)" : "Recurrence days (0 = manual tracking)"}</label>
       <input id="pi_recurrenceDays" type="number" min="0" class="text-input" value="${item.recurrenceDays || 0}">
       <label>${lang === "am" ? "ቀጣይ ቀን (ማብቂያ)" : "Next due date"}</label>
@@ -175,7 +241,7 @@ window.openPlanItemModal = async function (id) {
     item.title = el("pi_title").value.trim();
     item.executor = el("pi_executor").value.trim();
     item.metricTarget = el("pi_metricTarget").value.trim();
-    item.timing = item.metricTarget;
+    item.timing = el("pi_timing").value.trim() || item.timing || "";
     item.recurrenceDays = Number(el("pi_recurrenceDays").value) || 0;
     item.nextDate = el("pi_nextDate").value || null;
     await put("planItems", item);
@@ -195,7 +261,7 @@ window.resetPlanToDefault = async () => {
     { danger: true, okLabel: lang === "am" ? "እሺ፣ ዳግም አስጀምር" : "Yes, Reset" }
   );
   if (!ok) return;
-  const existing = await getAll("planItems");
+  const existing = (await getAll("planItems")).filter(planVisibleToRole);
   for (const item of existing) await del("planItems", item.id);
   await ensurePlanItems();
   renderPlan();
@@ -238,10 +304,10 @@ async function importPlanExcel(file) {
   const existing = await getAll("planItems");
   let count = 0;
   for (const row of rows) {
-    const title = String(pick(row, ["ርዕስ", "Title", "title"])).trim();
+    const title = String(pick(row, ["ርዕስ", "አብይ ተግባር", "Title", "title"])).trim();
     if (!title) continue;
     const categoryRaw = String(pick(row, ["ክፍል (main/internal)", "ክፍል", "Category", "category"])).trim().toLowerCase();
-    const category = categoryRaw === "internal" ? "internal" : "main";
+    const category = categoryRaw === "internal" ? "internal" : (categoryRaw === "children" ? "children" : "main");
     const existingItem = existing.find((p) => p.category === category && p.title === title);
     const item = existingItem || {
       id: uid(), category, no: existing.filter((p) => p.category === category).length + 1,
@@ -249,10 +315,10 @@ async function importPlanExcel(file) {
     };
     item.title = title;
     item.subUnit = String(pick(row, ["ንዑስ ክፍል", "Sub-unit", "subUnit"])).trim() || item.subUnit || "";
-    item.executor = String(pick(row, ["አስፈጻሚ", "Executor", "executor"])).trim() || item.executor || "";
-    item.metricTarget = String(pick(row, ["ዒላማ", "Target", "metricTarget"])).trim() || item.metricTarget || "";
-    item.timing = String(pick(row, ["ጊዜ", "Timing", "timing"])).trim() || item.metricTarget || item.timing || "";
-    const details = pick(row, ["ዝርዝር", "Details"]); if (details) item.details = String(details).trim();
+    item.executor = String(pick(row, ["አስፈጻሚ", "ፈጻሚ አካል", "Executor", "executor"])).trim() || item.executor || "";
+    item.metricTarget = String(pick(row, ["ዒላማ", "እቅድ", "Target", "metricTarget"])).trim() || item.metricTarget || "";
+    item.timing = String(pick(row, ["ጊዜ", "የጊዜ ገደብ", "Timing", "timing"])).trim() || item.metricTarget || item.timing || "";
+    const details = pick(row, ["ዝርዝር", "ዝርዝር ተግባር", "Details"]); if (details) item.details = String(details).trim();
     const outcome = pick(row, ["ውጤት", "Outcome"]); if (outcome) item.outcome = String(outcome).trim();
     const indicator = pick(row, ["መለኪያ", "Indicator"]); if (indicator) item.indicator = String(indicator).trim();
     const budget = pick(row, ["በጀት", "Budget"]); if (budget) item.budget = String(budget).trim();

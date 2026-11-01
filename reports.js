@@ -41,7 +41,7 @@ async function computeHrReportData(months) {
   });
   callRows.sort((a, b) => b.date.localeCompare(a.date));
 
-  const planItemsAll = await getAll("planItems");
+  const planItemsAll = (await getAll("planItems")).filter((p) => p.category !== "children");
   const planRows = planItemsAll.map((p) => {
     const doneInPeriod = (p.doneLog || []).filter((d) => d.date >= startISO && d.date <= endISO).length;
     let doneStr, status;

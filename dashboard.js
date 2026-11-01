@@ -83,7 +83,7 @@ async function renderDashboard() {
   if (currentFilter === "allCalendar") {
     absentees = await computeConsecutiveAbsences();
   } else if (currentFilter === "allPrograms") {
-    const progKeys = PROGRAM_DEFS().map((pd) => pd.key);
+    const progKeys = visiblePrograms().map((pd) => pd.key);
     const allResults = [];
     for (const key of progKeys) {
       const results = await computeProgramSpecificAbsences(key);
@@ -99,29 +99,30 @@ async function renderDashboard() {
     absentees = await computeProgramSpecificAbsences(currentFilter);
   }
 
-  const [confessionDue, hrDueAll, settings] = await Promise.all([computeConfessionDue(), computePlanReminders(), getSettings()]);
+  const [confessionDue, hrDueAll, settings] = await Promise.all([isChildrenRole() ? Promise.resolve([]) : computeConfessionDue(), computePlanReminders(), getSettings()]);
   // computePlanReminders() returns every item that has ANY next date set
   // (used elsewhere too, e.g. notifications, which filter it themselves) —
   // the dashboard should only surface items actually due now, so marking
   // one Done (which pushes its next date into the future) makes it
   // disappear from here, the same way absentee/confession items do.
-  const hrLookaheadCutoff = isoDate(addDays(new Date(), 15));
+  const hrLookaheadCutoff = isoDate(addDays(new Date(), isChildrenRole() ? 30 : 15));
   const hrDue = hrDueAll.filter((e) => e.nextDate && e.nextDate <= hrLookaheadCutoff);
-  const members = await getAll("members");
-  const attendance = await getAll("attendance");
+  const members = await getVisibleMembers();
+  let attendance = await getAll("attendance");
+  if (isChildrenRole()) { const vis = new Set(members.map((m) => m.id)); attendance = attendance.filter((a) => vis.has(a.memberId)); }
   const today = todayISO();
   const todayCount = attendance.filter((a) => a.sessionDate === today).length;
   const thr = settings.absenceThreshold || 3;
   const lang = getLang();
 
-  const families = await getAll("families");
+  const families = isChildrenRole() ? [] : await getAll("families");
   const memberMap = new Map(members.map((m) => [m.id, m]));
   const childToFamily = new Map();
   families.forEach((f) => {
     if (f.firstSonId) childToFamily.set(f.firstSonId, f);
     (f.childrenIds || []).forEach((cid) => childToFamily.set(cid, f));
   });
-  const familyMeetingsDue = await computeFamilyMeetingsDue();
+  const familyMeetingsDue = isChildrenRole() ? [] : await computeFamilyMeetingsDue();
   function familyContactLine(f) {
     const father = f.fatherId ? memberMap.get(f.fatherId) : null;
     const mother = f.motherId ? memberMap.get(f.motherId) : null;
@@ -135,7 +136,7 @@ async function renderDashboard() {
     { value: "timhert", label: t("dash.filterCourse") },
     { value: "mezmur", label: t("dash.filterMezmur") },
     { value: "tselot", label: t("dash.filterTselot") },
-    ...PROGRAM_DEFS().filter((pd) => !["timhert", "mezmur", "tselot"].includes(pd.key)).map((pd) => ({ value: pd.key, label: pd.name })),
+    ...(isChildrenRole() ? [] : PROGRAM_DEFS()).filter((pd) => !["timhert", "mezmur", "tselot"].includes(pd.key)).map((pd) => ({ value: pd.key, label: pd.name })),
   ];
 
   let statLabel;
@@ -149,11 +150,11 @@ async function renderDashboard() {
 
   el("view").innerHTML = `
     <p class="muted" style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;margin-top:0;">📅 ${ethLabel(today)}</p>
-    <div class="stat-grid">
+    <div class="stat-grid" ${isChildrenRole() ? 'style="grid-template-columns:repeat(3,1fr);"' : ""}>
       <div class="stat-card"><div class="stat-num">${members.length}</div><div class="stat-label">${t("dash.totalMembers")}</div></div>
       <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">${t("dash.todayAttendance")}</div></div>
       <div class="stat-card"><div class="stat-num">${absentees.length}</div><div class="stat-label">${statLabel}</div></div>
-      <div class="stat-card"><div class="stat-num">${confessionDue.length}</div><div class="stat-label">${t("dash.confessionDueStat")}</div></div>
+      ${isChildrenRole() ? "" : `<div class="stat-card"><div class="stat-num">${confessionDue.length}</div><div class="stat-label">${t("dash.confessionDueStat")}</div></div>`}
     </div>
 
     <details class="dash-section" open>
@@ -167,6 +168,7 @@ async function renderDashboard() {
       ${absentees.length ? `<div class="list">${absentees.map(a => absenteeRow(a)).join("")}</div>` : `<p class="muted">${t("dash.noAbsentees")}</p>`}
     </details>
 
+    ${isChildrenRole() ? "" : `
     <details class="dash-section">
       <summary style="${summaryStyle}">${t("dash.confessionTitle")} (${confessionDue.length})</summary>
       ${confessionDue.length ? `<div class="list">${confessionDue.map(c => {
@@ -192,8 +194,11 @@ async function renderDashboard() {
       }).join("")}</div>` : `<p class="muted">${lang === "am" ? "ሁሉም ቤተሰቦች ተገናኝተዋል" : "All families are up to date"}</p>`}
     </details>
 
+    `}
+
     <details class="dash-section">
-      <summary style="${summaryStyle}">${t("dash.hrTitle")} (${hrDue.length})</summary>
+      <summary style="${summaryStyle}">${isChildrenRole() ? (lang === "am" ? "🗂️ የሕጻናት ክፍል ዕቅድ ማስታወሻ" : "🗂️ Children's department plan reminders") : t("dash.hrTitle")} (${hrDue.length})</summary>
+      ${hrDue.length ? "" : `<p class="muted">${lang === "am" ? "በቅርቡ የሚደርስ ዕቅድ የለም" : "Nothing due soon"}</p>`}
       <div class="list">${hrDue.map(e => `
         <div class="list-row">
           <div><b>${e.title}</b><br><span class="muted">${e.subUnit} ${e.nextDate ? "— " + t("dash.expected") + ": " + ethLabel(e.nextDate) + " (" + e.nextDate + ")" : ""}</span></div>

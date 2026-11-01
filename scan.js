@@ -11,7 +11,7 @@
 // ---------- Scan ----------
 async function renderScan() {
   const members = await getVisibleMembers();
-  const progs = PROGRAM_DEFS();
+  const progs = visiblePrograms();
   el("view").innerHTML = `
     <div class="scan-controls">
       <label>${t("scan.programLabel")}</label>
