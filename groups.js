@@ -48,6 +48,7 @@ async function renderGroups() {
   if (view === "confessionFathers") return renderGroupsConfessionFathers();
   if (view === "occupation") return renderGroupsOccupation();
   if (view === "dutyRoster") return renderDutyRoster();
+  if (view === "attendanceSheets") return renderAttendanceSheets();
   return renderGroupsMenu();
 }
 
@@ -94,6 +95,7 @@ async function renderGroupsMenu() {
     { view: "occupation", icon: "💼", label: lang === "am" ? "ሥራ" : "Occupation" },
     { view: "dutyRoster", icon: "📅", label: lang === "am" ? "ምደባ" : "Duty Roster" },
     { view: "families", icon: "👪", label: lang === "am" ? "የቤተሰብ መዋቅር" : "Family Structure" },
+    { view: "attendanceSheets", icon: "📊", label: lang === "am" ? "የመገኘት ሉሆች" : "Attendance Sheets" },
     { view: "serviceAttendance", icon: "📋", label: lang === "am" ? "የአገልግሎት አቴንዳንስ" : "Service Attendance" },
     { view: "lostMembers", icon: "🔍", label: lang === "am" ? "የጠፉ አባላት" : "Lost Members" },
     { view: "universityStudents", icon: "🎓", label: lang === "am" ? "የዩኒቨርሲቲ ተማሪዎች" : "University Students" },

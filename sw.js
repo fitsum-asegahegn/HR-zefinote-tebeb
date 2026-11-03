@@ -1,4 +1,4 @@
-const CACHE = "finote-attendance-v74";
+const CACHE = "finote-attendance-v75";
 
 const APP_SHELL = [
   "./",
@@ -6,6 +6,7 @@ const APP_SHELL = [
   "./app.js",
   "./roster.js",
   "./attendance-edit.js",
+  "./attendance-sheets.js",
   "./discipline.js",
   "./groups.js",
   "./reports.js",
@@ -35,6 +36,7 @@ const RUNTIME_LIBS = [
   "https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js",
   "https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js",
   "https://cdn.jsdelivr.net/npm/docx@8/build/index.umd.js",
+  "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js",
   "https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js",
 ];
 
