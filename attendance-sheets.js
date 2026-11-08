@@ -478,7 +478,7 @@ async function renderAttendanceSheets() {
     <label class="sel-check" style="gap:8px;margin-bottom:12px;">
       <input type="checkbox" id="as_oneFile" ${st.oneFile ? "checked" : ""}/> ${am ? "ሁሉንም በአንድ ፋይል (ገጽ በገጽ)" : "Everything in one file (one page group per list)"}
     </label>
-    <button id="as_word" class="btn-primary" style="width:100%;" disabled>${am ? "Word ፋይሎችን አውርድ" : "Download Word files"}</button>`;
+    <button id="as_word" class="btn-primary" style="width:100%;">${am ? "Word ፋይሎችን አውርድ" : "Download Word files"}</button>`;
 
   const params = () => ({
     attendance, members, from: st.from || "", to: periodEnd(), excluded: st.excluded,
@@ -572,7 +572,6 @@ async function renderAttendanceSheets() {
         <div class="list-row"><div><b>${am ? `ቢያንስ ${l.n} ቀን` : `At least ${l.n} day${l.n === 1 ? "" : "s"}`}</b></div><span class="badge badge-green">${l.people.length}</span></div>`).join("")
         + (words.punishedLeftOut ? `<p class="muted">${am ? `${words.punishedLeftOut} በቅጣት ላይ ያሉ አባላት አልተካተቱም` : `${words.punishedLeftOut} member(s) on punishment left out`}</p>` : "");
     }
-    el("as_word").disabled = !st.holiday || !words.days.length;
   }
 
   el("as_from").onchange = async (e) => { st.from = e.target.value; await setSetting("attSheetsFrom", st.from); refresh(); };
@@ -601,6 +600,16 @@ async function renderAttendanceSheets() {
   el("as_download").onclick = (e) => withButtonLoading(e.currentTarget, am ? "በማዘጋጀት ላይ..." : "Preparing...", () =>
     downloadAttendanceSheetsXlsx(data, { ethHeaders: st.eth, from: st.from, to: periodEnd() }));
   el("as_word").onclick = async (e) => {
+    if (!st.holiday) {
+      await showAlert(am ? "መጀመሪያ የበዓሉን ቀን ያስገቡ (ከላይ «የበዓሉ ቀን»)" : "Enter the holiday date first (the \"Holiday date\" field at the top).");
+      el("as_holiday").scrollIntoView({ behavior: "smooth", block: "center" });
+      el("as_holiday").focus();
+      return;
+    }
+    if (!words.days.length) {
+      await showAlert(am ? "በዚህ ጊዜ ውስጥ ምንም መገኘት የለም — የ«ከዚህ ቀን ጀምሮ» ቀንን ያረጋግጡ" : "There is no attendance in this period — check the From date.");
+      return;
+    }
     const ok = await withButtonLoading(e.currentTarget, am ? "በማዘጋጀት ላይ..." : "Preparing...", () =>
       downloadMinDaysDocs({ result: words, holidayName: st.holidayName.trim(), oneFile: st.oneFile }));
     if (!ok) return;
