@@ -14,7 +14,7 @@
    It also makes the Word "at least N days" lists for a holiday (see
    buildMinDaysLists): the holiday date ends the period, the number of session
    days D in it sets the highest list, and lists are made for D, D-1 ... 1.
-   Depends on globals: getAll, getSettings, setSetting, el, escapeHtml, showAlert,
+   Depends on globals: getAll, getSettings, setSetting, loadExcuseIndex, isExcused, el, escapeHtml, showAlert,
    showConfirm, PROGRAM_DEFS, groupsBackBtn, ethShortDate, ethLabel,
    gregorianToEthiopian, ETH_MONTH_NAMES_AM, isoDate, addDays, todayISO,
    downloadBlob, withButtonLoading, getLang, docx (CDN). */
@@ -234,9 +234,164 @@ async function downloadMinDaysDocs({ result, holidayName, oneFile }) {
   return true;
 }
 
+// ---------- Per-program summary (attended/held + permissions) ----------
+// One row per person: for each program "attended/held" (held = dates in the
+// period on which that program had any attendance, after skipped dates), plus
+// "Permission" = sessions they missed but were excused (ፈቃድ) for.
+const SUMMARY_ORDER = ["mezmur", "tselot", "timhert", "mata", "kurban", "awdemihret"];
+const SUMMARY_AM = { timhert: "ትምህርት", mezmur: "ዝማሬ", tselot: "ጸሎት", mata: "የማታ", kurban: "ቁርባን", awdemihret: "አውደ ምሕረት" };
+
+function buildProgramSummary({ attendance, members, from, to, excluded, programKeys, isExcusedFn, punishedIds, includeAll }) {
+  const keys = SUMMARY_ORDER.filter((k) => programKeys.includes(k)).concat(programKeys.filter((k) => !SUMMARY_ORDER.includes(k)));
+  const skip = new Set(excluded || []);
+  const nameOf = new Map(members.map((m) => [m.id, m]));
+  const sessions = new Map(keys.map((k) => [k, new Set()]));
+  const got = new Map(); // memberId -> Map(programKey -> Set(dates))
+  let skippedDeleted = 0;
+  for (const a of attendance) {
+    if (from && a.sessionDate < from) continue;
+    if (to && a.sessionDate > to) continue;
+    if (skip.has(a.sessionDate) || !sessions.has(a.programKey)) continue;
+    if (!nameOf.has(a.memberId)) { skippedDeleted++; continue; }
+    sessions.get(a.programKey).add(a.sessionDate);
+    if (!got.has(a.memberId)) got.set(a.memberId, new Map());
+    const per = got.get(a.memberId);
+    if (!per.has(a.programKey)) per.set(a.programKey, new Set());
+    per.get(a.programKey).add(a.sessionDate);
+  }
+  const columns = keys.map((k) => ({ key: k, total: sessions.get(k).size }));
+  const pool = new Set(got.keys());
+  if (includeAll) members.filter((m) => m.active !== false).forEach((m) => pool.add(m.id));
+  // permissions only matter for people we'd list anyway, plus anyone excused at a held session
+  for (const m of members) {
+    if (pool.has(m.id)) continue;
+    for (const c of columns) for (const d of sessions.get(c.key)) if (isExcusedFn(m.id, d, c.key)) { pool.add(m.id); break; }
+  }
+  let punishedLeftOut = 0;
+  const rows = [];
+  for (const id of pool) {
+    if (punishedIds && punishedIds.has(id)) { punishedLeftOut++; continue; }
+    const per = got.get(id) || new Map();
+    let attended = 0, permission = 0;
+    const cells = {};
+    for (const c of columns) {
+      const mine = per.get(c.key) || new Set();
+      cells[c.key] = { n: mine.size, total: c.total };
+      attended += mine.size;
+      for (const d of sessions.get(c.key)) if (!mine.has(d) && isExcusedFn(id, d, c.key)) permission++;
+    }
+    rows.push({ name: nameOf.get(id).fullName, cells, attended, permission });
+  }
+  rows.sort((x, y) => (y.attended - x.attended) || (y.permission - x.permission) || x.name.localeCompare(y.name));
+  return { columns, rows, punishedLeftOut, skippedDeleted };
+}
+const summaryCell = (c) => (c.total ? `${c.n}/${c.total}` : "–");
+
+async function downloadSummaryXlsx(sum, { title, from, to }) {
+  const am = getLang() === "am";
+  if (typeof ExcelJS === "undefined") {
+    await showAlert(am ? "ExcelJS ቤተ-መጻሕፍት አልተጫነም — ኢንተርኔት ያረጋግጡ" : "The Excel library isn't loaded — check your connection and reopen the app.");
+    return false;
+  }
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Summary", { views: [{ state: "frozen", ySplit: 1 }] });
+  const thin = { style: "thin", color: { argb: "FFBFBFBF" } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const font = (o = {}) => ({ name: "Arial", size: 11, ...o });
+  const heads = ["#", "Name", ...sum.columns.map((c) => ATT_SHEET_NAMES[c.key] || c.key), "Permission"];
+  const last = heads.length;
+  heads.forEach((h, i) => {
+    const c = ws.getRow(1).getCell(i + 1);
+    c.value = h;
+    c.font = font({ bold: true, color: { argb: "FFFFFFFF" } });
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } };
+    c.alignment = { horizontal: "center", vertical: "middle" };
+    c.border = border;
+  });
+  sum.rows.forEach((r, idx) => {
+    const row = ws.getRow(idx + 2);
+    row.getCell(1).value = idx + 1;
+    row.getCell(2).value = r.name;
+    sum.columns.forEach((c, i) => { row.getCell(3 + i).value = summaryCell(r.cells[c.key]); }); // text, so "4/6" never turns into a date
+    row.getCell(last).value = r.permission;
+    for (let c = 1; c <= last; c++) {
+      const cell = row.getCell(c);
+      cell.font = font();
+      cell.border = border;
+      cell.alignment = { horizontal: c === 2 ? "left" : "center", vertical: "middle" };
+    }
+  });
+  const tr = sum.rows.length + 2;
+  const total = ws.getRow(tr);
+  total.getCell(2).value = "Sessions held";
+  sum.columns.forEach((c, i) => { total.getCell(3 + i).value = c.total; });
+  for (let c = 1; c <= last; c++) {
+    const cell = total.getCell(c);
+    cell.font = font({ bold: true });
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E2F3" } };
+    cell.border = border;
+    cell.alignment = { horizontal: c === 2 ? "left" : "center", vertical: "bottom" };
+  }
+  const nc = ws.getRow(tr + 2).getCell(2);
+  nc.value = `${title ? title + ". " : ""}Period: ${from ? attDateLabel(from) : "start"} – ${attDateLabel(to)}. "4/6" = attended 4 of the 6 sessions of that program. Permission = sessions missed with an approved permission.`
+    + (sum.punishedLeftOut ? ` ${sum.punishedLeftOut} member(s) on punishment left out.` : "")
+    + (sum.skippedDeleted ? ` ${sum.skippedDeleted} record(s) of deleted members skipped.` : "");
+  nc.font = font({ size: 9, italic: true });
+  ws.getColumn(1).width = 6;
+  ws.getColumn(2).width = 34;
+  sum.columns.forEach((_, i) => { ws.getColumn(3 + i).width = 11; });
+  ws.getColumn(last).width = 13;
+  const buf = await wb.xlsx.writeBuffer();
+  downloadBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `attendance-summary-${todayISO()}.xlsx`);
+  return true;
+}
+
+async function downloadSummaryDocx(sum, { holidayName }) {
+  const am = getLang() === "am";
+  if (typeof docx === "undefined") {
+    await showAlert(am ? "docx ቤተ-መጻሕፍት አልተጫነም — ኢንተርኔት ያረጋግጡ" : "The Word library isn't loaded — check your connection and reopen the app.");
+    return false;
+  }
+  const NYALA = "Nyala";
+  const b = { style: docx.BorderStyle.SINGLE, size: 4, color: "000000" };
+  const k = sum.columns.length;
+  const permW = 1100, nameW = 3000, numW = 600;
+  const progW = Math.floor((8640 - permW - nameW - numW) / Math.max(1, k));
+  const widths = [numW, nameW, ...sum.columns.map(() => progW), 8640 - numW - nameW - progW * k];
+  const cell = (text, i, bold, center) => new docx.TableCell({
+    width: { size: widths[i], type: docx.WidthType.DXA },
+    children: [new docx.Paragraph({ alignment: center ? docx.AlignmentType.CENTER : undefined, children: [new docx.TextRun({ text: String(text), bold: !!bold, font: NYALA })] })],
+  });
+  const heads = ["#", "ስም", ...sum.columns.map((c) => SUMMARY_AM[c.key] || c.key), "ፈቃድ"];
+  const rows = [new docx.TableRow({ tableHeader: true, children: heads.map((h, i) => cell(h, i, true, i !== 1)) })];
+  sum.rows.forEach((r, idx) => rows.push(new docx.TableRow({
+    cantSplit: true,
+    children: [String(idx + 1), r.name, ...sum.columns.map((c) => summaryCell(r.cells[c.key])), String(r.permission)].map((v, i) => cell(v, i, false, i !== 1)),
+  })));
+  rows.push(new docx.TableRow({
+    children: ["", "የተካሄዱ ክፍለ ጊዜዎች", ...sum.columns.map((c) => String(c.total)), ""].map((v, i) => cell(v, i, true, i !== 1)),
+  }));
+  const children = [
+    new docx.Paragraph({ alignment: docx.AlignmentType.CENTER, children: [new docx.TextRun({ text: holidayName ? `የ${holidayName} የአገልግሎት አቴንዳንስ ማጠቃለያ` : "የአገልግሎት አቴንዳንስ ማጠቃለያ", bold: true, size: 36, font: NYALA })] }),
+    new docx.Paragraph({ alignment: docx.AlignmentType.CENTER, spacing: { after: 200 }, children: [new docx.TextRun({ text: `(${sum.rows.length})`, font: NYALA })] }),
+    new docx.Table({
+      width: { size: 8640, type: docx.WidthType.DXA }, columnWidths: widths, layout: docx.TableLayoutType.FIXED,
+      borders: { top: b, bottom: b, left: b, right: b, insideHorizontal: b, insideVertical: b }, rows,
+    }),
+    new docx.Paragraph({ spacing: { before: 160 }, children: [new docx.TextRun({ text: "ማሳሰቢያ: «4/6» = ከ6 ክፍለ ጊዜዎች 4ቱ ላይ ተገኝቷል። ፈቃድ = በፈቃድ የቀረባቸው ክፍለ ጊዜዎች ብዛት።", font: NYALA })] }),
+  ];
+  if (sum.punishedLeftOut) children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: `ማሳሰቢያ: ${sum.punishedLeftOut} አባላት በቅጣት ላይ ስለሆኑ አልተካተቱም።`, font: NYALA })] }));
+  const doc = new docx.Document({
+    styles: { default: { document: { run: { font: "Nyala" } } } },
+    sections: [{ properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1440, right: 1800, bottom: 1440, left: 1800 } } }, children }],
+  });
+  downloadBlob(await docx.Packer.toBlob(doc), `Attendance_summary_${todayISO()}.docx`);
+  return true;
+}
+
 async function renderAttendanceSheets() {
   const am = getLang() === "am";
-  const [attendance, members, punishments, settings] = await Promise.all([getAll("attendance"), getAll("members"), getAll("punishments"), getSettings()]);
+  const [attendance, members, punishments, settings, excuseIdx] = await Promise.all([getAll("attendance"), getAll("members"), getAll("punishments"), getSettings(), loadExcuseIndex()]);
   const progs = PROGRAM_DEFS();
   const programNames = {};
   progs.forEach((p) => { programNames[p.key] = ATT_SHEET_NAMES[p.key] || p.name; });
@@ -252,6 +407,8 @@ async function renderAttendanceSheets() {
   if (st.eth === undefined) st.eth = false;
   if (st.oneFile === undefined) st.oneFile = false;
   if (st.skipPunished === undefined) st.skipPunished = true;
+  if (!st.sumProgs) st.sumProgs = ["mezmur", "tselot", "timhert"].filter((k) => withData.some((p) => p.key === k));
+  if (st.sumAll === undefined) st.sumAll = false;
 
   // the period ends the day before the holiday (or today when no holiday is set)
   const periodEnd = () => (st.holiday ? isoDate(addDays(new Date(st.holiday + "T00:00:00"), -1)) : todayISO());
@@ -293,6 +450,22 @@ async function renderAttendanceSheets() {
     </label>
     <div id="as_preview" class="list" style="margin-bottom:12px;"></div>
     <button id="as_download" class="btn-primary" style="width:100%;" disabled>${am ? "Excel አውርድ" : "Download Excel"}</button>
+
+    <h3 class="section-title">${am ? "ማጠቃለያ (በፕሮግራም)" : "Summary per program"}</h3>
+    <p class="muted">${am ? "«4/6» = ከ6 ክፍለ ጊዜዎች 4ቱ ላይ ተገኝቷል። ፈቃድ = በፈቃድ የቀረባቸው ክፍለ ጊዜዎች ብዛት።" : "\"4/6\" = attended 4 of the 6 sessions of that program. Permission = sessions missed with an approved permission."}</p>
+    ${withData.map((p) => `
+      <label class="sel-check" style="gap:8px;margin-bottom:6px;">
+        <input type="checkbox" class="as_sumprog" value="${p.key}" ${st.sumProgs.includes(p.key) ? "checked" : ""}/> ${escapeHtml(p.name)}
+      </label>`).join("")}
+    <label class="sel-check" style="gap:8px;margin:8px 0 8px;">
+      <input type="checkbox" id="as_sumAll" ${st.sumAll ? "checked" : ""}/> ${am ? "ምንም ያልተገኙ አባላትንም ጨምር" : "Also list members with no attendance"}
+    </label>
+    <p class="muted" id="as_sumInfo"></p>
+    <div id="as_sumTable" style="overflow:auto;max-height:320px;margin-bottom:10px;"></div>
+    <div class="toolbar">
+      <button id="as_sumXlsx" class="btn-primary" disabled>${am ? "Excel አውርድ" : "Download Excel"}</button>
+      <button id="as_sumDocx" class="btn-secondary" disabled>${am ? "Word አውርድ" : "Download Word"}</button>
+    </div>
 
     <h3 class="section-title">${am ? "የ Word ዝርዝሮች (ቢያንስ N ቀን)" : "Word lists (at least N days)"}</h3>
     <label>${am ? "የበዓሉ ስም (ርዕስ)" : "Holiday name (title)"}</label>
@@ -343,6 +516,7 @@ async function renderAttendanceSheets() {
 
   let data = { sheets: [], skipped: 0 };
   let words = { days: [], lists: [], skippedDeleted: 0, punishedLeftOut: 0 };
+  let summary = { columns: [], rows: [], punishedLeftOut: 0, skippedDeleted: 0 };
   function refresh(redrawDates = true) {
     if (redrawDates) drawDates();
     const to = periodEnd();
@@ -355,6 +529,32 @@ async function renderAttendanceSheets() {
       + (data.skipped ? `<p class="muted">${am ? `${data.skipped} የተሰረዙ አባላት መዝገቦች ተዘለዋል` : `${data.skipped} record(s) of deleted members will be skipped`}</p>` : "")
       : `<p class="muted">${am ? "በተመረጡት መስፈርቶች ምንም መገኘት የለም" : "No attendance matches these settings"}</p>`;
     el("as_download").disabled = !data.sheets.length;
+
+    summary = buildProgramSummary({
+      attendance, members, from: st.from || "", to, excluded: st.excluded,
+      programKeys: withData.map((p) => p.key).filter((k) => st.sumProgs.includes(k)),
+      isExcusedFn: (id, d, key) => isExcused(excuseIdx, id, d, key),
+      punishedIds: punishedIds(), includeAll: st.sumAll,
+    });
+    el("as_sumInfo").textContent = summary.columns.length
+      ? (am ? `${summary.rows.length} ሰዎች · የተካሄዱ ክፍለ ጊዜዎች: ` : `${summary.rows.length} people · sessions held: `)
+        + summary.columns.map((c) => `${ATT_SHEET_NAMES[c.key] || c.key} ${c.total}`).join(" · ")
+        + (summary.punishedLeftOut ? (am ? ` · ${summary.punishedLeftOut} በቅጣት ላይ አልተካተቱም` : ` · ${summary.punishedLeftOut} on punishment left out`) : "")
+      : (am ? "ቢያንስ አንድ ፕሮግራም ይምረጡ" : "Tick at least one program.");
+    const cellStyle = "padding:5px 9px;border:1px solid var(--border);text-align:center;white-space:nowrap;";
+    el("as_sumTable").innerHTML = summary.columns.length && summary.rows.length ? `
+      <table style="border-collapse:collapse;font-size:0.8rem;width:100%;">
+        <tr style="background:var(--bg2);color:var(--amber);">
+          <th style="${cellStyle}text-align:left;">${am ? "ስም" : "Name"}</th>
+          ${summary.columns.map((c) => `<th style="${cellStyle}">${escapeHtml(ATT_SHEET_NAMES[c.key] || c.key)}</th>`).join("")}
+          <th style="${cellStyle}">${am ? "ፈቃድ" : "Permission"}</th>
+        </tr>
+        ${summary.rows.map((r) => `<tr>
+          <td style="${cellStyle}text-align:left;">${escapeHtml(r.name)}</td>
+          ${summary.columns.map((c) => `<td style="${cellStyle}">${summaryCell(r.cells[c.key])}</td>`).join("")}
+          <td style="${cellStyle}">${r.permission}</td></tr>`).join("")}
+      </table>` : "";
+    el("as_sumXlsx").disabled = el("as_sumDocx").disabled = !(summary.columns.length && summary.rows.length);
 
     words = buildMinDaysLists({ ...params(), punishedIds: punishedIds() });
     if (!st.holiday) {
@@ -389,6 +589,15 @@ async function renderAttendanceSheets() {
   el("as_eth").onchange = (e) => { st.eth = e.target.checked; };
   el("as_punish").onchange = (e) => { st.skipPunished = e.target.checked; refresh(false); };
   el("as_oneFile").onchange = (e) => { st.oneFile = e.target.checked; };
+  el("view").querySelectorAll(".as_sumprog").forEach((cb) => {
+    cb.onchange = () => { st.sumProgs = [...el("view").querySelectorAll(".as_sumprog:checked")].map((x) => x.value); refresh(false); };
+  });
+  el("as_sumAll").onchange = (e) => { st.sumAll = e.target.checked; refresh(false); };
+  const sumTitle = () => (st.holidayName || "").trim();
+  el("as_sumXlsx").onclick = (e) => withButtonLoading(e.currentTarget, am ? "በማዘጋጀት ላይ..." : "Preparing...", () =>
+    downloadSummaryXlsx(summary, { title: sumTitle(), from: st.from, to: periodEnd() }));
+  el("as_sumDocx").onclick = (e) => withButtonLoading(e.currentTarget, am ? "በማዘጋጀት ላይ..." : "Preparing...", () =>
+    downloadSummaryDocx(summary, { holidayName: sumTitle() }));
   el("as_download").onclick = (e) => withButtonLoading(e.currentTarget, am ? "በማዘጋጀት ላይ..." : "Preparing...", () =>
     downloadAttendanceSheetsXlsx(data, { ethHeaders: st.eth, from: st.from, to: periodEnd() }));
   el("as_word").onclick = async (e) => {
